@@ -377,9 +377,9 @@ test("agent summarizes history when context reaches 85 percent", async () => {
   assert.equal(calls[0].settings.toolMode, "prompt");
   assert.match(calls[0].messages.at(-1).content, /Write the summary now/);
   assert.equal(calls[1].messages[0].role, "system");
-  assert.match(calls[1].messages[1].content, /Earlier conversation summary/);
+  assert.match(calls[1].messages[1].content, /Conversation summary/);
   assert.match(calls[1].messages[1].content, /COMPACT SUMMARY/);
-  assert.equal(agent.history[0].content.startsWith("[Earlier conversation summary]"), true);
+  assert.ok(agent.history[0].content.startsWith("[Conversation summary"));
   assert.ok(events.some((event) => event.type === "compression_start"));
   assert.ok(events.some((event) => event.type === "compression_done"));
   assert.ok(events.some((event) => event.type === "notice" && /85%/.test(event.text)));
@@ -416,7 +416,7 @@ test("agent compacts when the provider reports 85 percent usage", async () => {
   assert.equal(changed, true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].settings.toolMode, "prompt");
-  assert.equal(agent.history[0].content.startsWith("[Earlier conversation summary]"), true);
+  assert.ok(agent.history[0].content.startsWith("[Conversation summary"));
   assert.equal(agent.lastPromptTokens, 0);
 });
 

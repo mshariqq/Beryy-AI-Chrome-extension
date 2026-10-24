@@ -46,15 +46,6 @@ function isContextLengthError(error) {
   );
 }
 
-const COMPACTION_PROMPT = `You compress conversation history for a browser-automation agent.
-Write a dense summary that preserves the information needed to continue the task:
-- the user's active goal, constraints, and completed work;
-- important URLs, page state, names, values, selectors, refs, and IDs;
-- actions taken and their results, including failures and errors;
-- pending next steps and decisions already made.
-Merge repeated or irrelevant browsing details. Do not invent information.
-Return only the summary, with no preamble.`;
-
 function contentToText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return String(content ?? "");
@@ -75,6 +66,12 @@ function historyUnits(history) {
 
   while (index < history.length) {
     const item = history[index];
+    if (item?.role === "user") {
+      units.push([item]);
+      index += 1;
+      continue;
+    }
+
     if (item?.role === "assistant") {
       const unit = [item];
       index += 1;
@@ -110,10 +107,14 @@ function splitHistoryForCompression(history, keepTokens) {
 
   if (start <= 0) return null;
 
-  return {
-    old: units.slice(0, start).flat(),
-    recent: units.slice(start).flat()
-  };
+  const old = units.slice(0, start).flat();
+  const recent = units.slice(start).flat();
+
+  if (recent.length > 0 && recent[0].role === "tool") {
+    return null;
+  }
+
+  return { old, recent };
 }
 
 function toolCallXml(call) {
@@ -298,7 +299,11 @@ export class Agent {
         )
       },
       messages: [
-        { role: "system", content: COMPACTION_PROMPT },
+        {
+          role: "system",
+          content:
+            "You are a conversation summarizer. Write a concise, dense summary that preserves all information needed to continue the task: user goals, decisions, URLs, selectors, tool results, errors, and pending next steps. Do not invent information. Return only the summary text, no formatting, no tool calls."
+        },
         {
           role: "user",
           content: `Earlier conversation:\n\n${transcript}\n\nWrite the summary now.`
@@ -334,8 +339,8 @@ export class Agent {
 
       this.history = [
         {
-          role: "user",
-          content: `[Earlier conversation summary]\n${summary}`
+          role: "system",
+          content: `[Conversation summary — earlier context compressed]\n${summary}`
         },
         ...split.recent
       ];
