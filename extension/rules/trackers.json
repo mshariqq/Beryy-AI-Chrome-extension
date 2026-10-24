@@ -1,0 +1,177 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "2mdn.net",
+        "33across.com",
+        "adform.net",
+        "adnxs-simple.com",
+        "adnxs.com",
+        "ads.linkedin.com",
+        "adsrvr.org",
+        "adsymptotic.com",
+        "adservice.google.com",
+        "advertising.com",
+        "agkn.com",
+        "amazon-adsystem.com",
+        "bat.bing.com",
+        "bidswitch.net",
+        "bluekai.com",
+        "c.bing.com",
+        "casalemedia.com",
+        "criteo.com",
+        "criteo.net",
+        "demdex.net",
+        "doubleclick.net",
+        "exelator.com",
+        "flashtalking.com",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "gumgum.com",
+        "indexexchange.com",
+        "krxd.net",
+        "mathtag.com",
+        "media.net",
+        "merchantpool1.linkedin.com",
+        "moatads.com",
+        "openx.net",
+        "pubmatic.com",
+        "rlcdn.com",
+        "rubiconproject.com",
+        "serving-sys.com",
+        "sharethrough.com",
+        "smartadserver.com",
+        "sovrn.com",
+        "spotxchange.com",
+        "taboola.com",
+        "tapad.com",
+        "teads.tv",
+        "tidaltv.com",
+        "triplelift.com",
+        "turn.com",
+        "yieldmo.com",
+        "zemanta.com"
+      ],
+      "resourceTypes": [
+        "script",
+        "image",
+        "xmlhttprequest",
+        "sub_frame",
+        "ping",
+        "other",
+        "media"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "amplitude.com",
+        "analytics.google.com",
+        "clicktale.net",
+        "clarity.ms",
+        "comscore.com",
+        "contentsquare.net",
+        "crazyegg.com",
+        "decibelinsight.net",
+        "fullstory.com",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "heap.io",
+        "heapanalytics.com",
+        "histats.com",
+        "hotjar.com",
+        "inspectlet.com",
+        "kissmetrics.com",
+        "logrocket.com",
+        "luckyorange.com",
+        "matomo.cloud",
+        "mixpanel.com",
+        "mouseflow.com",
+        "newrelic.com",
+        "nielsen.com",
+        "nr-data.net",
+        "optimizely.com",
+        "quantummetric.com",
+        "quantserve.com",
+        "scorecardresearch.com",
+        "segment.com",
+        "segment.io",
+        "smartlook.com",
+        "statcounter.com"
+      ],
+      "resourceTypes": [
+        "script",
+        "image",
+        "xmlhttprequest",
+        "sub_frame",
+        "ping",
+        "other",
+        "media"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": [
+        "ads-twitter.com",
+        "ads.pinterest.com",
+        "ads.tiktok.com",
+        "analytics.pinterest.com",
+        "analytics.tiktok.com",
+        "analytics.twitter.com",
+        "ct.pinterest.com",
+        "facebook.net",
+        "sc-static.net",
+        "static.ads-twitter.com",
+        "tr.snapchat.com"
+      ],
+      "resourceTypes": [
+        "script",
+        "image",
+        "xmlhttprequest",
+        "sub_frame",
+        "ping",
+        "other",
+        "media"
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||facebook.com/tr^",
+      "resourceTypes": ["script", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||linkedin.com/li/track^",
+      "resourceTypes": ["script", "image", "xmlhttprequest", "ping", "other"]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||linkedin.com/realtime/realtimeFrontendClientConnectivityTracking",
+      "resourceTypes": ["script", "image", "xmlhttprequest", "ping", "other"]
+    }
+  }
+]

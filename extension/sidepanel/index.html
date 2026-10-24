@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beryy</title>
+    <link rel="icon" href="../icons/icon32.png" />
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <img class="logo" src="../icons/berry-logo.png" alt="" aria-hidden="true" />
+          <div class="brand-text">
+            <div class="name">Beryy</div>
+            <div class="model" id="model-label">Loading…</div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <select id="mode-select" class="mode" title="Permission mode" aria-label="Permission mode">
+            <option value="ask">Ask</option>
+            <option value="auto">Auto</option>
+            <option value="read_only">Read only</option>
+          </select>
+          <button id="history" class="icon-button" type="button" title="Chat history" aria-label="Chat history">☰</button>
+          <button id="new-chat" class="icon-button" type="button" title="New chat" aria-label="New chat">+</button>
+          <button id="settings" class="icon-button" type="button" title="Settings" aria-label="Settings">⚙</button>
+        </div>
+      </header>
+
+      <main id="messages" class="messages" aria-live="polite">
+        <section id="welcome" class="welcome">
+          <img class="welcome-mark" src="../icons/berry-logo.png" alt="" aria-hidden="true" />
+          <h1>What should I do in this tab?</h1>
+          <p class="welcome-copy">
+            I can read the page, click, type, and navigate. I ask before I change anything.
+          </p>
+          <p class="welcome-tab" id="welcome-tab"></p>
+          <div class="suggestions">
+            <button type="button" data-prompt="Summarize this page.">Summarize this page</button>
+            <button type="button" data-prompt="Find the main action on this page and describe where it is.">Find the main action</button>
+            <button type="button" data-prompt="Read this page and list the key links.">List key links</button>
+          </div>
+          <p class="welcome-note" id="welcome-note">Add an API key in settings to get started.</p>
+        </section>
+      </main>
+
+      <div id="status" class="status" hidden></div>
+
+      <footer class="composer-wrap">
+        <div class="model-row provider-row">
+          <label class="model-caption" for="provider-select">Provider</label>
+          <select
+            id="provider-select"
+            class="provider-select"
+            aria-label="Model provider"
+            title="Active model provider"
+          ></select>
+        </div>
+        <div class="model-row">
+          <label class="model-caption" for="model-select">Model</label>
+          <select
+            id="model-select"
+            class="model-select"
+            aria-label="Model"
+            title="Available models"
+          >
+            <option value="">Add an API key to load models</option>
+          </select>
+          <button
+            id="refresh-models"
+            class="model-refresh"
+            type="button"
+            title="Refresh available models"
+            aria-label="Refresh available models"
+          >
+            ↻
+          </button>
+        </div>
+        <form id="composer" class="composer">
+          <textarea
+            id="prompt"
+            rows="1"
+            placeholder="Ask Beryy to do something in this tab…"
+            aria-label="Message"
+          ></textarea>
+          <button id="send" class="send" type="submit" title="Send (Enter)">Send</button>
+          <button id="stop" class="stop" type="button" hidden>Stop</button>
+        </form>
+        <div class="hint">Enter to send · Shift+Enter for a new line</div>
+      </footer>
+    </div>
+
+    <div id="permission" class="overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="permission-title">
+        <h2 id="permission-title">Permission needed</h2>
+        <p id="permission-reason" class="permission-reason"></p>
+        <dl class="permission-details">
+          <dt>Action</dt>
+          <dd id="permission-action"></dd>
+          <dt>Site</dt>
+          <dd id="permission-host"></dd>
+          <dt>Tab</dt>
+          <dd id="permission-tab"></dd>
+        </dl>
+        <details class="permission-args">
+          <summary>Arguments</summary>
+          <pre id="permission-args-text"></pre>
+        </details>
+        <div class="modal-actions">
+          <button id="permission-deny" class="danger" type="button">Deny</button>
+          <button id="permission-domain" type="button">Always allow this site</button>
+          <button id="permission-once" class="primary" type="button">Allow once</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="history-overlay" class="overlay" hidden>
+      <div
+        class="modal history-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-title"
+      >
+        <div class="history-head">
+          <h2 id="history-title">Chat history</h2>
+          <button
+            id="history-close"
+            class="icon-button"
+            type="button"
+            title="Close chat history"
+            aria-label="Close chat history"
+          >
+            ×
+          </button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+        <div class="modal-actions">
+          <button id="history-new" class="primary" type="button">New chat</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

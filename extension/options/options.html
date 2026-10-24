@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beryy settings</title>
+    <link rel="icon" href="../icons/icon32.png" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div class="brand">
+          <img class="logo" src="../icons/berry-logo.png" alt="" aria-hidden="true" />
+          <div>
+            <h1>Beryy settings</h1>
+            <p>Connect NVIDIA NIM or Google AI Studio. Everything stays in this Chrome profile.</p>
+          </div>
+        </div>
+      </header>
+
+      <form id="settings-form" class="card">
+        <section>
+          <h2>Model provider</h2>
+          <p class="section-note">
+            Keys and model choices are saved separately for each provider. Switch providers
+            here or from the side panel. Any compatible
+            <code>/chat/completions</code> endpoint also works.
+          </p>
+
+          <label class="field">
+            <span>Active provider</span>
+            <select id="provider" name="provider">
+              <option value="nvidia">NVIDIA NIM</option>
+              <option value="google">Google AI Studio</option>
+              <option value="custom">Custom endpoint</option>
+            </select>
+            <small id="provider-note"></small>
+          </label>
+
+          <label class="field">
+            <span>API key</span>
+            <div class="inline">
+              <input id="apiKey" name="apiKey" type="password" placeholder="nvapi-…" autocomplete="off" spellcheck="false" />
+              <button id="toggle-key" type="button" class="secondary">Show</button>
+            </div>
+            <small>Stored in <code>chrome.storage.local</code> for this profile. It is sent only to the selected provider's base URL.</small>
+          </label>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="baseUrl" name="baseUrl" type="url" placeholder="https://integrate.api.nvidia.com/v1" spellcheck="false" />
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input id="model" name="model" type="text" placeholder="meta/llama-3.3-70b-instruct" spellcheck="false" />
+          </label>
+
+          <div class="grid three">
+            <label class="field">
+              <span>Temperature</span>
+              <input id="temperature" name="temperature" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label class="field">
+              <span>Max output tokens</span>
+              <input id="maxTokens" name="maxTokens" type="number" min="64" max="65536" step="1" />
+            </label>
+            <label class="field">
+              <span>Max agent steps</span>
+              <input id="maxSteps" name="maxSteps" type="number" min="1" max="40" step="1" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Tool calling</span>
+            <select id="toolMode" name="toolMode">
+              <option value="auto">Auto (native tool calls, fall back to prompt format)</option>
+              <option value="native">Native tool calls only</option>
+              <option value="prompt">Prompt format only</option>
+            </select>
+            <small>Use prompt format for models that do not support OpenAI tools.</small>
+          </label>
+
+          <label class="check">
+            <input id="vision" name="vision" type="checkbox" />
+            <span>Send screenshots to the model (vision model required)</span>
+          </label>
+
+          <label class="check" id="nvidia-rate-limit-row" hidden>
+            <input id="nvidiaRateLimit" name="nvidiaRateLimit" type="checkbox" />
+            <span>
+              Respect NVIDIA's API rate limit
+              <small>Your API Rate Limit: Up to 40 rpm. When on, Beryy waits before sending requests that would go over the standard NVIDIA limit. Applies only to NVIDIA.</small>
+            </span>
+          </label>
+        </section>
+
+        <section>
+          <h2>Permissions</h2>
+          <p class="section-note">
+            Beryy asks before it reads, clicks, types, navigates, or runs JavaScript.
+            Read-only mode is the safest default for unfamiliar sites.
+          </p>
+
+          <label class="field">
+            <span>Default permission mode</span>
+            <select id="permissionMode" name="permissionMode">
+              <option value="ask">Ask every time (except reads after approval)</option>
+              <option value="auto">Automatically allow actions</option>
+              <option value="read_only">Read only</option>
+            </select>
+          </label>
+
+          <div class="grid two">
+            <label class="field">
+              <span>Blocked domains</span>
+              <textarea id="blockedDomains" name="blockedDomains" rows="4" placeholder="bank.example.com&#10;*.internal.example"></textarea>
+              <small>One domain per line. Subdomains are included.</small>
+            </label>
+            <label class="field">
+              <span>Trusted domains</span>
+              <textarea id="trustedDomains" name="trustedDomains" rows="4" placeholder="docs.example.com"></textarea>
+              <small>Actions on these domains skip the permission prompt in Ask mode.</small>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Privacy and pacing</h2>
+          <p class="section-note">
+            Beryy blocks a bundled list of known ad, analytics, and social trackers.
+            Add a site here if blocking breaks it. This list is separate from action permissions.
+          </p>
+
+          <label class="check">
+            <input id="blockTrackers" name="blockTrackers" type="checkbox" />
+            <span>Block known ad and analytics trackers</span>
+          </label>
+
+          <label class="field">
+            <span>Tracker allowlist</span>
+            <textarea id="trackerAllowlist" name="trackerAllowlist" rows="3" placeholder="example.com&#10;*.trusted.example"></textarea>
+            <small>One domain per line. Trackers keep working on these sites and their subdomains.</small>
+          </label>
+
+          <label class="check">
+            <input id="antiBotGuard" name="antiBotGuard" type="checkbox" />
+            <span>Add short, randomized pauses after browser actions</span>
+          </label>
+
+          <label class="field">
+            <span>Action delay (ms)</span>
+            <input id="actionDelayMs" name="actionDelayMs" type="number" min="0" max="5000" step="50" />
+            <small>Base pause after clicks, typing, navigation, and scrolling. A little jitter is added automatically. This cannot bypass CAPTCHAs or site security.</small>
+          </label>
+        </section>
+
+        <section>
+          <h2>Custom instructions</h2>
+          <label class="field">
+            <span>Extra system prompt</span>
+            <textarea id="systemPromptExtra" name="systemPromptExtra" rows="5" placeholder="Optional. Example: Always answer in Spanish and prefer keyboard shortcuts."></textarea>
+          </label>
+        </section>
+
+        <div class="actions">
+          <button id="save" type="submit" class="primary">Save settings</button>
+          <button id="test" type="button" class="secondary">Test connection</button>
+          <button id="clear-key" type="button" class="secondary">Clear API key</button>
+          <button id="reset" type="button" class="secondary">Reset defaults</button>
+          <span id="status" class="status" role="status"></span>
+        </div>
+      </form>
+
+      <p class="footnote">
+        Beryy is an independent experiment. It is not affiliated with Anthropic or
+        Claude. Use it only on sites and accounts you are allowed to automate.
+      </p>
+    </main>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
