@@ -159,7 +159,7 @@ async function mouseMove(cdp, tabId, x, y, modifiers = 0) {
 async function mouseClick(cdp, tabId, x, y, options = {}) {
   const { button = "left", clickCount = 1, modifiers = 0 } = options;
   await mouseMove(cdp, tabId, x, y, modifiers);
-  await sleep(40);
+  await sleep(120);
   for (let count = 1; count <= clickCount; count += 1) {
     await cdp.send(tabId, "Input.dispatchMouseEvent", {
       type: "mousePressed",

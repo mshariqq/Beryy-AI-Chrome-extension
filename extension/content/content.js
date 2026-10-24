@@ -341,7 +341,7 @@
     return truncated ? output : output.trimEnd();
   }
 
-  function getRefCoordinates(ref, scrollIntoView = true) {
+function getRefCoordinates(ref, scrollIntoView = true) {
     const element = resolveRef(ref);
     if (!element) return null;
 
@@ -357,32 +357,38 @@
       }
     }
 
-    const rect = element.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return null;
+    // Re-verify position after potential scroll/layout shift
+    return new Promise(resolve => {
+      setTimeout(() => {
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return resolve(null);
 
-    const x = Math.min(Math.max(0, rect.left + rect.width / 2), window.innerWidth - 1);
-    const y = Math.min(Math.max(0, rect.top + rect.height / 2), window.innerHeight - 1);
+        const x = Math.min(Math.max(0, rect.left + rect.width / 2), window.innerWidth - 1);
+        const y = Math.min(Math.max(0, rect.top + rect.height / 2), window.innerHeight - 1);
 
-    let coveredBy = null;
-    const hit = document.elementFromPoint(x, y);
-    if (hit && hit !== element && !element.contains(hit) && !hit.contains(element)) {
-      coveredBy = describeElement(hit);
-    }
+        let coveredBy = null;
+        const hit = document.elementFromPoint(x, y);
+        if (hit && hit !== element && !element.contains(hit) && !hit.contains(element)) {
+          coveredBy = describeElement(hit);
+        }
 
-    return {
-      x,
-      y,
-      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      tag: element.tagName.toLowerCase(),
-      text: (element.textContent || "").trim().slice(0, 80),
-      coveredBy
-    };
+        resolve({
+          x,
+          y,
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          tag: element.tagName.toLowerCase(),
+          text: (element.textContent || "").trim().slice(0, 80),
+          coveredBy
+        });
+      }, 50);
+    });
   }
 
-  function scrollToRef(ref) {
-    const result = getRefCoordinates(ref, true);
-    if (!result) throw new Error(`${ref} was not found or is no longer visible.`);
-    return result;
+function scrollToRef(ref) {
+    return getRefCoordinates(ref, true).then(result => {
+      if (!result) throw new Error(`${ref} was not found or is no longer visible.`);
+      return result;
+    });
   }
 
   function dispatchInputEvents(element) {

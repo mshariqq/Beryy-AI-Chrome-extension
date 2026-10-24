@@ -87,7 +87,9 @@ function loadContent() {
     chrome,
     getComputedStyle: () => ({ display: "block", visibility: "visible" }),
     CSS: { escape: (value) => String(value) },
-    console
+    console,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    setInterval: (fn, ms) => setInterval(fn, ms)
   });
 
   vm.runInContext(contentSource, context);
