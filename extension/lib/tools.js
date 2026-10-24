@@ -253,6 +253,14 @@ async function computer(ctx, args) {
       } else {
         [x, y] = requireCoordinate(args);
       }
+
+      // Clamp coordinates to viewport bounds
+      const vp = await viewport(ctx.cdp, tabId).catch(() => null);
+      if (vp) {
+        x = Math.max(0, Math.min(x, vp.width - 1));
+        y = Math.max(0, Math.min(y, vp.height - 1));
+      }
+
       const clickCount =
         action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
       await mouseClick(ctx.cdp, tabId, x, y, {
@@ -270,7 +278,7 @@ async function computer(ctx, args) {
         }
       }
 
-      // Take screenshot after click so model can see result
+      // Take screenshot after click so model sees result
       const shot = await takeScreenshot(ctx.cdp, tabId);
       const shotResult = screenshotResult(
         shot,
@@ -291,6 +299,14 @@ async function computer(ctx, args) {
       } else {
         [x, y] = requireCoordinate(args);
       }
+
+      // Clamp coordinates to viewport bounds
+      const vp = await viewport(ctx.cdp, tabId).catch(() => null);
+      if (vp) {
+        x = Math.max(0, Math.min(x, vp.width - 1));
+        y = Math.max(0, Math.min(y, vp.height - 1));
+      }
+
       await mouseMove(ctx.cdp, tabId, x, y, modifiers);
       return textResult(`Hovered at (${Math.round(x)}, ${Math.round(y)})`);
     }
