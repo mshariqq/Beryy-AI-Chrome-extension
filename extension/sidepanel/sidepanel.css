@@ -120,6 +120,47 @@ button {
   white-space: nowrap;
 }
 
+.context-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  padding: 2px 0 0;
+}
+
+.context-bar {
+  width: 80px;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#context-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+#context-percent {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+}
+
+.context-indicator.warn #context-bar-fill {
+  background: var(--warn);
+}
+
+.context-indicator.danger #context-bar-fill {
+  background: var(--err);
+}
+
 .top-actions {
   display: flex;
   align-items: center;

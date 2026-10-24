@@ -621,6 +621,13 @@ export class Agent {
           }
           const messages = this.buildMessages(tabContext);
           this.lastRequestEstimate = estimateMessagesTokens(messages);
+          const limit = this.contextLimit();
+          this.onEvent({
+            type: "context_usage",
+            percent: Math.min(100, Math.round((this.lastRequestEstimate / limit) * 100)),
+            estimated: this.lastRequestEstimate,
+            limit
+          });
           result = await this.stream({
             settings: this.settings,
             messages,

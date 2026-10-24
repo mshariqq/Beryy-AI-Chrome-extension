@@ -81,6 +81,20 @@ function setStatus(text, busy = false) {
   statusEl.classList.toggle("busy", Boolean(busy));
 }
 
+function updateContextIndicator(percent) {
+  const indicator = $("context-indicator");
+  const percentEl = $("context-percent");
+  const fillEl = $("context-bar-fill");
+  if (!indicator || !percentEl || !fillEl) return;
+
+  percentEl.textContent = `${percent}%`;
+  fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+
+  indicator.hidden = false;
+  indicator.classList.toggle("warn", percent >= 70 && percent < 85);
+  indicator.classList.toggle("danger", percent >= 85);
+}
+
 function updateComposer() {
   sendButton.disabled = running;
   stopButton.hidden = !running;
@@ -691,6 +705,9 @@ function handleAgentEvent(event, token) {
     case "compression_done":
     case "compression_failed":
       setStatus("Thinking…", true);
+      break;
+    case "context_usage":
+      updateContextIndicator(event.percent);
       break;
     case "assistant_delta": {
       const block = ensureTextBlock();
