@@ -260,6 +260,16 @@ async function computer(ctx, args) {
         clickCount,
         modifiers
       });
+
+      // Wait for potential navigation after left clicks
+      if (action === "left_click" || action === "double_click") {
+        try {
+          await waitForTabLoad(tabId, 8000);
+        } catch {
+          // Navigation timeout - continue anyway
+        }
+      }
+
       return textResult(`${action} at (${Math.round(x)}, ${Math.round(y)})`);
     }
 
