@@ -270,7 +270,15 @@ async function computer(ctx, args) {
         }
       }
 
-      return textResult(`${action} at (${Math.round(x)}, ${Math.round(y)})`);
+      // Take screenshot after click so model can see result
+      const shot = await takeScreenshot(ctx.cdp, tabId);
+      const shotResult = screenshotResult(
+        shot,
+        `${action} at (${Math.round(x)}, ${Math.round(y)})`,
+        ctx.screenshots,
+        ctx.settings?.vision
+      );
+      return shotResult;
     }
 
     case "hover": {
