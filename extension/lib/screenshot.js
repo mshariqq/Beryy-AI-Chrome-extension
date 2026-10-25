@@ -22,7 +22,7 @@ export class ScreenshotStore {
   }
 }
 
-async function viewport(cdp, tabId) {
+export async function viewport(cdp, tabId) {
   const result = await cdp.send(tabId, "Runtime.evaluate", {
     expression: "JSON.stringify([window.innerWidth, window.innerHeight, window.devicePixelRatio])",
     returnByValue: true

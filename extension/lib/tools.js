@@ -1,5 +1,5 @@
 import { sendContent } from "./content.js";
-import { takeRegionScreenshot, takeScreenshot } from "./screenshot.js";
+import { takeRegionScreenshot, takeScreenshot, viewport } from "./screenshot.js";
 import { formatTabContext } from "../shared/prompt.js";
 import { domainFromUrl, findMatchingDomain } from "../shared/policy.js";
 
@@ -67,6 +67,58 @@ function waitForTabLoad(tabId, timeoutMs = 10000) {
     const timer = setTimeout(() => finish(false), timeoutMs);
     cancel = () => finish(false);
     chrome.tabs.onUpdated.addListener(listener);
+  });
+  return { promise, cancel };
+}
+
+function waitAfterClick(tabId, previousUrl, graceMs = 800, loadMs = 8000) {
+  let cancel = () => {};
+  const promise = new Promise((resolve) => {
+    let settled = false;
+    let graceTimer = null;
+    let loadTimer = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(graceTimer);
+      clearTimeout(loadTimer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(value);
+    };
+    const watchLoad = () => {
+      clearTimeout(graceTimer);
+      if (!loadTimer) loadTimer = setTimeout(() => finish(true), loadMs);
+    };
+    const listener = (id, info, tab) => {
+      if (id !== tabId || settled) return;
+      if (info.status === "loading") {
+        watchLoad();
+        return;
+      }
+      if (info.status === "complete") {
+        finish(true);
+        return;
+      }
+      if (tab?.url && tab.url !== previousUrl) {
+        clearTimeout(graceTimer);
+        if (tab.status === "complete") finish(true);
+        else watchLoad();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    graceTimer = setTimeout(() => finish(false), graceMs);
+    cancel = () => finish(false);
+    chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (settled) return;
+        if (tab.status === "loading") watchLoad();
+        else if (tab.url && tab.url !== previousUrl) {
+          if (tab.status === "complete") finish(true);
+          else watchLoad();
+        }
+      })
+      .catch(() => {});
   });
   return { promise, cancel };
 }
@@ -263,26 +315,24 @@ async function computer(ctx, args) {
 
       const clickCount =
         action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
+      const before = await chrome.tabs.get(tabId).catch(() => null);
       await mouseClick(ctx.cdp, tabId, x, y, {
         button: action === "right_click" ? "right" : "left",
         clickCount,
         modifiers
       });
 
-      // Wait for potential navigation after left clicks
+      // Wait for navigation only when the click actually starts one.
+      let navigated = false;
       if (action === "left_click" || action === "double_click") {
-        try {
-          await waitForTabLoad(tabId, 8000);
-        } catch {
-          // Navigation timeout - continue anyway
-        }
+        navigated = await waitAfterClick(tabId, before?.url || "").promise;
       }
 
       // Take screenshot after click so model sees result
       const shot = await takeScreenshot(ctx.cdp, tabId);
       const shotResult = screenshotResult(
         shot,
-        `${action} at (${Math.round(x)}, ${Math.round(y)})`,
+        `${action} at (${Math.round(x)}, ${Math.round(y)})${navigated ? " - page changed" : ""}`,
         ctx.screenshots,
         ctx.settings?.vision
       );
