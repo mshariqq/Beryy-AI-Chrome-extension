@@ -245,6 +245,144 @@ test("streamChat retries a temporary provider failure", async () => {
   }
 });
 
+test("streamChat retries 429 and honors Retry-After", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const chunks = [
+    'data: {"choices":[{"delta":{"content":"Recovered"},"finish_reason":"stop"}]}\n\n',
+    "data: [DONE]\n\n"
+  ].map((chunk) => encoder.encode(chunk));
+  const retries = [];
+  let calls = 0;
+
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        ok: false,
+        status: 429,
+        headers: {
+          get: (name) => (name.toLowerCase() === "retry-after" ? "3" : null)
+        },
+        text: async () =>
+          JSON.stringify({ error: { message: "rate limit exceeded" } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            chunks.length ? { done: false, value: chunks.shift() } : { done: true },
+          releaseLock: () => {}
+        })
+      }
+    };
+  };
+
+  try {
+    const result = await streamChat({
+      settings: { ...providerSettings(), provider: "groq" },
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+      forcePrompt: true,
+      onRetryWait: (event) => retries.push(event)
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.content, "Recovered");
+    assert.equal(retries[0].status, 429);
+    assert.equal(retries[0].waitMs, 3250);
+    assert.equal(retries[0].attempt, 1);
+    assert.equal(retries[0].maxRetries, 4);
+    assert.equal(retries.at(-1).waitMs, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamChat reads reset headers when Retry-After is absent", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const chunks = [
+    'data: {"choices":[{"delta":{"content":"Recovered"},"finish_reason":"stop"}]}\n\n',
+    "data: [DONE]\n\n"
+  ].map((chunk) => encoder.encode(chunk));
+  const retries = [];
+  let calls = 0;
+
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        ok: false,
+        status: 429,
+        headers: {
+          get: (name) =>
+            name.toLowerCase() === "x-ratelimit-reset-tokens" ? "0.05s" : null
+        },
+        text: async () =>
+          JSON.stringify({ error: { message: "rate limit exceeded" } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            chunks.length ? { done: false, value: chunks.shift() } : { done: true },
+          releaseLock: () => {}
+        })
+      }
+    };
+  };
+
+  try {
+    await streamChat({
+      settings: { ...providerSettings(), provider: "custom" },
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+      forcePrompt: true,
+      onRetryWait: (event) => retries.push(event)
+    });
+    assert.equal(calls, 2);
+    assert.equal(retries[0].waitMs, 300);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamChat explains OpenRouter free-model privacy blocks", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    text: async () =>
+      JSON.stringify({
+        error: {
+          message:
+            "No endpoints found matching your data policy (Free model publication)"
+        }
+      })
+  });
+
+  try {
+    await assert.rejects(
+      streamChat({
+        settings: { ...providerSettings(), provider: "openrouter" },
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+        forcePrompt: true
+      }),
+      /Allow free-model publication/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamChat times out when the stream goes idle", async () => {
   const originalFetch = globalThis.fetch;
 

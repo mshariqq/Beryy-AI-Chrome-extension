@@ -1,5 +1,6 @@
-import { sendContent } from "./content.js";
+import { sendContent, sendContentAll, sendContentToFrame, firstFrameResult, frameErrors, frameTokenFromRef } from "./content.js";
 import { takeRegionScreenshot, takeScreenshot, viewport } from "./screenshot.js";
+import { frameContextForToken, frameOffset } from "./frames.js";
 import { formatTabContext } from "../shared/prompt.js";
 import { domainFromUrl, findMatchingDomain } from "../shared/policy.js";
 
@@ -48,6 +49,19 @@ function normalizeUrl(raw) {
   if (value === "back" || value === "forward") return value;
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
   return `https://${value}`;
+}
+
+function requireAbsolutePaths(paths) {
+  const list = Array.isArray(paths)
+    ? paths.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  if (!list.length) throw new Error("paths must contain at least one file path.");
+  for (const filePath of list) {
+    if (!/^([a-zA-Z]:[\\/]|\\\\|\/)/.test(filePath)) {
+      throw new Error(`File path must be absolute: ${filePath}`);
+    }
+  }
+  return list;
 }
 
 function waitForTabLoad(tabId, timeoutMs = 10000) {
@@ -152,7 +166,7 @@ function keyInfo(raw) {
   return { key: value, code: value, vk: 0 };
 }
 
-async function dispatchKey(cdp, tabId, combo, explicitModifiers = 0) {
+async function dispatchKey(cdp, tabId, combo, explicitModifiers = 0, sessionId = "") {
   const parts = String(combo || "").split("+").filter(Boolean);
   let modifiers = explicitModifiers;
   for (let i = 0; i < parts.length - 1; i += 1) {
@@ -163,38 +177,50 @@ async function dispatchKey(cdp, tabId, combo, explicitModifiers = 0) {
   const info = keyInfo(key);
   const wantsText = Boolean(info.text) && modifiers === 0;
 
-  await cdp.send(tabId, "Input.dispatchKeyEvent", {
-    type: wantsText ? "keyDown" : "rawKeyDown",
-    key: info.key,
-    code: info.code,
-    windowsVirtualKeyCode: info.vk,
-    nativeVirtualKeyCode: info.vk,
-    modifiers,
-    text: wantsText ? info.text : undefined
-  });
+  await cdp.send(
+    tabId,
+    "Input.dispatchKeyEvent",
+    {
+      type: wantsText ? "keyDown" : "rawKeyDown",
+      key: info.key,
+      code: info.code,
+      windowsVirtualKeyCode: info.vk,
+      nativeVirtualKeyCode: info.vk,
+      modifiers,
+      text: wantsText ? info.text : undefined
+    },
+    20000,
+    sessionId
+  );
 
-  await cdp.send(tabId, "Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: info.key,
-    code: info.code,
-    windowsVirtualKeyCode: info.vk,
-    nativeVirtualKeyCode: info.vk,
-    modifiers
-  });
+  await cdp.send(
+    tabId,
+    "Input.dispatchKeyEvent",
+    {
+      type: "keyUp",
+      key: info.key,
+      code: info.code,
+      windowsVirtualKeyCode: info.vk,
+      nativeVirtualKeyCode: info.vk,
+      modifiers
+    },
+    20000,
+    sessionId
+  );
 }
 
-async function typeText(cdp, tabId, text) {
+async function typeText(cdp, tabId, text, sessionId = "") {
   const value = String(text ?? "");
   if (value.length > 500) {
-    await cdp.send(tabId, "Input.insertText", { text: value });
+    await cdp.send(tabId, "Input.insertText", { text: value }, 20000, sessionId);
     return;
   }
 
   for (const char of value) {
     if (char === "\n") {
-      await dispatchKey(cdp, tabId, "Enter");
+      await dispatchKey(cdp, tabId, "Enter", 0, sessionId);
     } else {
-      await cdp.send(tabId, "Input.insertText", { text: char });
+      await cdp.send(tabId, "Input.insertText", { text: char }, 20000, sessionId);
     }
   }
 }
@@ -245,20 +271,136 @@ export function coveredClickError(ref, point) {
   return `${ref} is covered by ${point.coveredBy}. Dismiss that overlay, then call read_page again.`;
 }
 
-async function refPoint(tabId, ref) {
-  const result = await sendContent(tabId, {
+function shortValue(value) {
+  if (typeof value === "boolean") return String(value);
+  const text = String(value ?? "").replace(/\s+/g, " ").slice(0, 80);
+  return `"${text}"`;
+}
+
+export function describeClickOutcome(before, after, navigated = false) {
+  const parts = [];
+  if (before?.description) parts.push(`Target: ${before.description}.`);
+  if (navigated) {
+    parts.push("Page navigated.");
+    return parts.join(" ");
+  }
+  if (!before) return parts.join(" ");
+  if (!after) {
+    parts.push("The target was removed after the click.");
+    return parts.join(" ");
+  }
+
+  const changes = [];
+  if (before.description !== after.description) {
+    changes.push(`target ${before.description} -> ${after.description}`);
+  }
+  const fields = [
+    ["label", "ariaLabel"],
+    ["pressed", "ariaPressed"],
+    ["expanded", "ariaExpanded"],
+    ["checked", "ariaChecked"],
+    ["disabled", "disabled"],
+    ["text", "text"]
+  ];
+  for (const [label, key] of fields) {
+    if (String(before[key] ?? "") === String(after[key] ?? "")) continue;
+    changes.push(`${label} ${shortValue(before[key])} -> ${shortValue(after[key])}`);
+  }
+
+  if (changes.length) {
+    parts.push(`State changed: ${changes.join("; ")}.`);
+  } else {
+    parts.push(
+      "No accessible state change detected; verify with find or read_page before claiming success."
+    );
+  }
+  return parts.join(" ");
+}
+
+function frameFailure(results, fallback) {
+  return new Error(frameErrors(results)[0] || fallback);
+}
+
+async function refPoint(ctx, tabId, ref) {
+  const results = await sendContentAll(tabId, {
     type: "getRefCoordinates",
     ref,
     scrollIntoView: true
   });
-  if (!result || !Number.isFinite(result.x) || !Number.isFinite(result.y)) {
-    throw new Error(`Could not resolve ${ref}. Call read_page again to refresh refs.`);
+  const hit = firstFrameResult(
+    results,
+    (entry) => Number.isFinite(entry.result?.x) && Number.isFinite(entry.result?.y)
+  );
+  if (!hit) {
+    throw frameFailure(results, `Could not resolve ${ref}. Call read_page again to refresh refs.`);
   }
 
-  const covered = coveredClickError(ref, result);
+  let offset = { x: 0, y: 0 };
+  if (!hit.frame?.isTopFrame) {
+    offset = await frameOffset(ctx.cdp, tabId, hit.frame?.token || frameTokenFromRef(ref), {
+      scrollIntoView: true
+    }).catch(() => null);
+    if (!offset) {
+      throw new Error(`Could not locate the frame for ${ref}. Call read_page again to refresh refs.`);
+    }
+  }
+
+  const x = hit.result.x + offset.x;
+  const y = hit.result.y + offset.y;
+  const vp = await viewport(ctx.cdp, tabId).catch(() => null);
+  if (vp && (x < 0 || y < 0 || x >= vp.width || y >= vp.height)) {
+    throw new Error(
+      `${ref} is outside the visible viewport. Scroll the page so its frame is visible, then retry.`
+    );
+  }
+
+  const covered = coveredClickError(ref, hit.result);
   if (covered) throw new Error(covered);
 
-  return result;
+  return {
+    ...hit.result,
+    x,
+    y,
+    frameX: hit.result.x,
+    frameY: hit.result.y,
+    frameOffset: offset
+  };
+}
+
+async function refState(tabId, ref) {
+  const results = await sendContentAll(tabId, { type: "getRefState", ref });
+  return firstFrameResult(results)?.result || null;
+}
+
+async function keyboardSession(ctx, tabId, ref) {
+  const targetRef = String(ref || "").trim();
+  if (targetRef) {
+    const results = await sendContentAll(tabId, {
+      type: "focusRef",
+      ref: targetRef
+    }).catch(() => []);
+    const focused = firstFrameResult(results, (entry) => entry.result === true);
+    if (!focused) {
+      throw new Error(`Could not focus ${targetRef}. Call read_page again to refresh refs.`);
+    }
+    const token = frameTokenFromRef(targetRef);
+    if (!token) return "";
+    const context = await frameContextForToken(ctx.cdp, tabId, token).catch(() => null);
+    return context?.sessionId || "";
+  }
+
+  const results = await sendContentAll(tabId, { type: "getFocusInfo" }).catch(() => []);
+  const activeFrames = results.filter(
+    (entry) => entry.ok && entry.result?.active && entry.result?.editable
+  );
+  const focused = activeFrames.find((entry) => entry.result.focused) || activeFrames[0];
+  if (!focused || focused.result.isTopFrame) return "";
+  const context = await frameContextForToken(
+    ctx.cdp,
+    tabId,
+    focused.result.token
+  ).catch(() => null);
+  return context?.sessionId || "";
 }
 
 function screenshotResult(shot, label, screenshots, vision) {
@@ -298,10 +440,13 @@ async function computer(ctx, args) {
     case "triple_click": {
       let x;
       let y;
-      if (args.ref) {
-        const point = await refPoint(tabId, args.ref);
+      let targetState = null;
+      const ref = args.ref ? String(args.ref) : "";
+      if (ref) {
+        const point = await refPoint(ctx, tabId, ref);
         x = point.x;
         y = point.y;
+        targetState = point.state || null;
       } else {
         [x, y] = requireCoordinate(args);
       }
@@ -311,6 +456,14 @@ async function computer(ctx, args) {
       if (vp) {
         x = Math.max(0, Math.min(x, vp.width - 1));
         y = Math.max(0, Math.min(y, vp.height - 1));
+      }
+
+      if (!targetState) {
+        targetState = await sendContent(tabId, {
+          type: "getPointState",
+          x,
+          y
+        }).catch(() => null);
       }
 
       const clickCount =
@@ -328,11 +481,16 @@ async function computer(ctx, args) {
         navigated = await waitAfterClick(tabId, before?.url || "").promise;
       }
 
+      const afterState = ref
+        ? await refState(tabId, ref).catch(() => null)
+        : await sendContent(tabId, { type: "getPointState", x, y }).catch(() => null);
+      const outcome = describeClickOutcome(targetState, afterState, navigated);
+
       // Take screenshot after click so model sees result
       const shot = await takeScreenshot(ctx.cdp, tabId);
       const shotResult = screenshotResult(
         shot,
-        `${action} at (${Math.round(x)}, ${Math.round(y)})${navigated ? " - page changed" : ""}`,
+        `${action} at (${Math.round(x)}, ${Math.round(y)})${outcome ? ` ${outcome}` : ""}`,
         ctx.screenshots,
         ctx.settings?.vision
       );
@@ -343,7 +501,7 @@ async function computer(ctx, args) {
       let x;
       let y;
       if (args.ref) {
-        const point = await refPoint(tabId, args.ref);
+        const point = await refPoint(ctx, tabId, args.ref);
         x = point.x;
         y = point.y;
       } else {
@@ -363,15 +521,17 @@ async function computer(ctx, args) {
 
     case "type": {
       if (typeof args.text !== "string") throw new Error("text is required for type.");
-      await typeText(ctx.cdp, tabId, args.text);
+      const sessionId = await keyboardSession(ctx, tabId, args.ref);
+      await typeText(ctx.cdp, tabId, args.text, sessionId);
       return textResult(`Typed ${args.text.length} characters.`);
     }
 
     case "key": {
       if (!args.text) throw new Error("text is required for key (e.g. 'Enter' or 'ctrl+a').");
       const repeat = Math.max(1, Math.min(100, Number(args.repeat) || 1));
+      const sessionId = await keyboardSession(ctx, tabId, args.ref);
       for (let i = 0; i < repeat; i += 1) {
-        await dispatchKey(ctx.cdp, tabId, args.text, modifiers);
+        await dispatchKey(ctx.cdp, tabId, args.text, modifiers, sessionId);
       }
       return textResult(`Pressed ${args.text}${repeat > 1 ? ` ${repeat} times` : ""}.`);
     }
@@ -412,8 +572,8 @@ async function computer(ctx, args) {
 
     case "scroll_to": {
       if (!args.ref) throw new Error("ref is required for scroll_to.");
-      const result = await sendContent(tabId, { type: "scrollToRef", ref: args.ref });
-      return textResult(`Scrolled ${args.ref} into view at (${Math.round(result.x)}, ${Math.round(result.y)}).`);
+      const point = await refPoint(ctx, tabId, args.ref);
+      return textResult(`Scrolled ${args.ref} into view at (${Math.round(point.x)}, ${Math.round(point.y)}).`);
     }
 
     case "zoom": {
@@ -432,7 +592,7 @@ async function computer(ctx, args) {
       let x2;
       let y2;
       if (args.ref) {
-        const point = await refPoint(tabId, args.ref);
+        const point = await refPoint(ctx, tabId, args.ref);
         x2 = point.x;
         y2 = point.y;
       } else {
@@ -565,7 +725,7 @@ export async function executeTool(ctx, tool, args = {}) {
 
     case "read_page": {
       const { tabId } = await getTabForTool(ctx, args);
-      const tree = await sendContent(tabId, {
+      const results = await sendContentAll(tabId, {
         type: "generateAccessibilityTree",
         options: {
           filter: args.filter || "all",
@@ -574,36 +734,134 @@ export async function executeTool(ctx, tool, args = {}) {
           ref_id: args.ref_id
         }
       });
-      return textResult(tree);
+
+      if (args.ref_id) {
+        const hit = firstFrameResult(
+          results,
+          (entry) =>
+            typeof entry.result === "string" && !entry.result.startsWith("Error:")
+        );
+        if (!hit) {
+          const reported = results.find(
+            (entry) => entry.ok && typeof entry.result === "string"
+          )?.result;
+          throw new Error(
+            reported || `${args.ref_id} was not found. Call read_page again.`
+          );
+        }
+        return textResult(hit.result);
+      }
+
+      const frames = results
+        .filter((entry) => entry.ok && typeof entry.result === "string")
+        .sort(
+          (a, b) =>
+            (Number(a.frame?.depth) || 0) - (Number(b.frame?.depth) || 0) ||
+            Number(Boolean(b.frame?.isTopFrame)) - Number(Boolean(a.frame?.isTopFrame))
+        );
+      const parts = [];
+      for (const entry of frames) {
+        const tree = entry.result.trim();
+        if (!tree || tree === "No accessible elements found on this page.") continue;
+        const label = entry.frame?.isTopFrame
+          ? ""
+          : `Frame: ${entry.frame?.url || "unknown"}${entry.frame?.title ? ` - ${entry.frame.title}` : ""}\n`;
+        parts.push(`${label}${tree}`);
+      }
+      return textResult(parts.join("\n\n") || "No accessible elements found on this page.");
     }
 
     case "get_page_text": {
       const { tabId } = await getTabForTool(ctx, args);
-      const pageText = await sendContent(tabId, {
+      const limit = Math.max(100, Math.min(200000, Number(args.max_chars) || 50000));
+      const results = await sendContentAll(tabId, {
         type: "getPageText",
-        maxChars: args.max_chars
+        maxChars: limit
       });
-      return textResult(pageText);
+      const frames = results
+        .filter((entry) => entry.ok && typeof entry.result === "string" && entry.result.trim())
+        .sort(
+          (a, b) =>
+            (Number(a.frame?.depth) || 0) - (Number(b.frame?.depth) || 0) ||
+            Number(Boolean(b.frame?.isTopFrame)) - Number(Boolean(a.frame?.isTopFrame))
+        );
+
+      const top = frames.find((entry) => entry.frame?.isTopFrame);
+      let output = top?.result || "";
+      for (const entry of frames) {
+        if (entry === top || output.length >= limit) continue;
+        const text = entry.result.trim();
+        if (text.length < 40) continue;
+        const header = `\n\n--- Frame: ${entry.frame?.url || "unknown"} ---\n`;
+        const remaining = limit - output.length - header.length;
+        if (remaining <= 0) break;
+        output += `${header}${text.slice(0, remaining)}`;
+      }
+      return textResult(output || "No page text found.");
     }
 
     case "find": {
       const { tabId } = await getTabForTool(ctx, args);
-      const matches = await sendContent(tabId, {
-        type: "findElements",
-        query: String(args.query || "")
-      });
-      return textResult(matches);
+      const query = String(args.query || "");
+      const frameInfos = await sendContentAll(tabId, { type: "getFrameInfo" });
+      const frames = frameInfos
+        .filter((entry) => entry.ok && entry.result)
+        .sort(
+          (a, b) =>
+            (Number(a.result.depth) || 0) - (Number(b.result.depth) || 0) ||
+            Number(Boolean(b.result.isTopFrame)) - Number(Boolean(a.result.isTopFrame))
+        );
+      const vp = await viewport(ctx.cdp, tabId).catch(() => null);
+      const parts = [];
+
+      for (const frame of frames) {
+        let offset = { x: 0, y: 0 };
+        let offsetKnown = Boolean(frame.result.isTopFrame);
+        if (!frame.result.isTopFrame) {
+          const found = await frameOffset(ctx.cdp, tabId, frame.result.token).catch(() => null);
+          if (found) {
+            offset = found;
+            offsetKnown = true;
+          }
+        }
+
+        const results = await sendContentToFrame(tabId, frame.frameId, {
+          type: "findElements",
+          query,
+          options: {
+            offsetX: offset.x,
+            offsetY: offset.y,
+            viewportWidth: vp?.width,
+            viewportHeight: vp?.height
+          }
+        });
+        const hit = firstFrameResult(results, (entry) => typeof entry.result === "string");
+        if (!hit || hit.result.startsWith("No elements matched")) continue;
+        const label = frame.result.isTopFrame
+          ? ""
+          : `Frame: ${frame.result.url || "unknown"}${offsetKnown ? "" : " (coordinates relative to frame)"}\n`;
+        parts.push(`${label}${hit.result}`);
+      }
+
+      if (!parts.length) {
+        return textResult(
+          `No elements matched "${query}". Try a different phrase, or use read_page to inspect the page.`
+        );
+      }
+      return textResult(parts.join("\n\n"));
     }
 
     case "form_input": {
       const { tabId } = await getTabForTool(ctx, args);
       if (!args.ref) throw new Error("ref is required for form_input.");
-      const message = await sendContent(tabId, {
+      const results = await sendContentAll(tabId, {
         type: "setFormInput",
         ref: args.ref,
         value: args.value
       });
-      return textResult(message);
+      const hit = firstFrameResult(results);
+      if (!hit) throw frameFailure(results, `Could not set ${args.ref}. Call read_page again.`);
+      return textResult(hit.result);
     }
 
     case "javascript_tool": {
@@ -709,13 +967,74 @@ export async function executeTool(ctx, tool, args = {}) {
       const data = ctx.screenshots.get(args.imageId);
       if (!data) throw new Error(`Unknown imageId ${args.imageId}. Take a new screenshot first.`);
       if (!args.ref) throw new Error("ref is required for upload_image.");
-      const message = await sendContent(tabId, {
+      const results = await sendContentAll(tabId, {
         type: "setFileInputFromDataUrl",
         ref: args.ref,
         dataUrl: `data:image/jpeg;base64,${data}`,
         filename: args.filename || "bery-screenshot.jpg"
       });
-      return textResult(message);
+      const hit = firstFrameResult(results);
+      if (!hit) throw frameFailure(results, `Could not attach the image to ${args.ref}.`);
+      return textResult(hit.result);
+    }
+
+    case "file_upload": {
+      const { tabId } = await getTabForTool(ctx, args);
+      if (!args.ref) throw new Error("ref is required for file_upload.");
+      const files = requireAbsolutePaths(args.paths);
+      const results = await sendContentAll(tabId, {
+        type: "getFileInputInfo",
+        ref: args.ref
+      });
+      const hit = firstFrameResult(results);
+      if (!hit) {
+        throw frameFailure(results, `${args.ref} is not a file input. Call read_page again.`);
+      }
+
+      const info = hit.result;
+      const token = info.token || frameTokenFromRef(args.ref);
+      const context = await frameContextForToken(ctx.cdp, tabId, token).catch(() => null);
+      if (!context) {
+        throw new Error("Could not locate the frame for this file input. Call read_page again.");
+      }
+
+      const evaluated = await ctx.cdp.send(
+        tabId,
+        "Runtime.evaluate",
+        {
+          expression: `window.__beryContent.fileInputByIndex(${Number(info.index)})`,
+          contextId: context.id,
+          returnByValue: false
+        },
+        20000,
+        context.sessionId
+      );
+      const objectId = evaluated?.result?.objectId;
+      if (!objectId) throw new Error(`Could not resolve ${args.ref} to a file input.`);
+
+      await ctx.cdp.send(
+        tabId,
+        "DOM.setFileInputFiles",
+        { files, objectId },
+        20000,
+        context.sessionId
+      );
+      await ctx.cdp
+        .send(
+          tabId,
+          "Runtime.evaluate",
+          {
+            expression: `window.__beryContent.notifyFileInput(${Number(info.index)})`,
+            contextId: context.id,
+            returnByValue: true
+          },
+          20000,
+          context.sessionId
+        )
+        .catch(() => {});
+      return textResult(
+        `Attached ${files.length} file${files.length === 1 ? "" : "s"} to ${args.ref}.`
+      );
     }
 
     default:

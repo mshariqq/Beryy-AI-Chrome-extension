@@ -25,6 +25,10 @@ const toolModeInput = $("toolMode");
 const visionInput = $("vision");
 const nvidiaRateLimitInput = $("nvidiaRateLimit");
 const nvidiaRateLimitRow = $("nvidia-rate-limit-row");
+const googleTpmInput = $("googleTpm");
+const googleRpdInput = $("googleRpd");
+const googleRpmInput = $("googleRpm");
+const googleRateLimitRow = $("google-rate-limit-row");
 const permissionModeInput = $("permissionMode");
 const blockedDomainsInput = $("blockedDomains");
 const trustedDomainsInput = $("trustedDomains");
@@ -52,6 +56,7 @@ function syncPacingControls() {
 
 function syncProviderControls() {
   nvidiaRateLimitRow.hidden = providerInput.value !== "nvidia";
+  googleRateLimitRow.hidden = providerInput.value !== "google";
 }
 
 function providerAccountFromForm() {
@@ -98,6 +103,9 @@ function populate(settings) {
   toolModeInput.value = settings.toolMode;
   visionInput.checked = Boolean(settings.vision);
   nvidiaRateLimitInput.checked = settings.nvidiaRateLimit !== false;
+  googleTpmInput.value = settings.googleTpm;
+  googleRpdInput.value = settings.googleRpd;
+  googleRpmInput.value = settings.googleRpm;
   permissionModeInput.value = settings.permissionMode;
   blockedDomainsInput.value = (settings.blockedDomains || []).join("\n");
   trustedDomainsInput.value = (settings.trustedDomains || []).join("\n");
@@ -125,6 +133,9 @@ function readForm() {
     toolMode: toolModeInput.value,
     vision: visionInput.checked,
     nvidiaRateLimit: nvidiaRateLimitInput.checked,
+    googleTpm: googleTpmInput.value,
+    googleRpd: googleRpdInput.value,
+    googleRpm: googleRpmInput.value,
     permissionMode: permissionModeInput.value,
     blockedDomains: blockedDomainsInput.value,
     trustedDomains: trustedDomainsInput.value,

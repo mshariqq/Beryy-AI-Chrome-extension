@@ -19,6 +19,26 @@ export const PROVIDERS = Object.freeze({
     modelPlaceholder: "gemma-4-26b-a4b-it",
     note: "Google's OpenAI-compatible Gemini endpoint. Gemma 4 26B A4B is faster and more stable on the free tier; Gemma 4 31B is also available. Free-tier content may be used to improve Google products."
   }),
+  groq: Object.freeze({
+    id: "groq",
+    label: "Groq",
+    shortLabel: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: "openai/gpt-oss-120b",
+    keyPlaceholder: "gsk_...",
+    modelPlaceholder: "openai/gpt-oss-120b",
+    note: "Groq's OpenAI-compatible endpoint. The GPT-OSS 120B free tier is about 30 requests/min, 8K tokens/min, and 1,000 requests/day per organization. Beryy retries 429s automatically."
+  }),
+  openrouter: Object.freeze({
+    id: "openrouter",
+    label: "OpenRouter",
+    shortLabel: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openrouter/free",
+    keyPlaceholder: "sk-or-v1-...",
+    modelPlaceholder: "openrouter/free",
+    note: "OpenRouter routes across many models. openrouter/free selects a free model that supports tool calling. Free tier: 20 requests/min and 50/day, or 1,000/day after $10 in credits. Enable free-model publication in OpenRouter privacy settings if prompted."
+  }),
   custom: Object.freeze({
     id: "custom",
     label: "Custom endpoint",

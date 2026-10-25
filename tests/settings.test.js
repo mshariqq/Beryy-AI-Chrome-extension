@@ -37,11 +37,11 @@ test("normalizeSettings clamps numeric fields", () => {
   const settings = normalizeSettings({
     temperature: 99,
     maxTokens: 1,
-    maxSteps: 100
+    maxSteps: 1000
   });
   assert.equal(settings.temperature, 2);
   assert.equal(settings.maxTokens, 64);
-  assert.equal(settings.maxSteps, 40);
+  assert.equal(settings.maxSteps, 800);
 
   const low = normalizeSettings({
     temperature: -5,
@@ -118,19 +118,70 @@ test("normalizeSettings preserves an empty model fallback", () => {
   assert.equal(settings.model, DEFAULT_SETTINGS.model);
 });
 
-test("normalizeSettings includes NVIDIA and Google defaults", () => {
+test("normalizeSettings includes provider defaults", () => {
   const settings = normalizeSettings({});
 
   assert.equal(settings.provider, "nvidia");
   assert.equal(settings.providerAccounts.nvidia.baseUrl, "https://integrate.api.nvidia.com/v1");
   assert.equal(settings.providerAccounts.google.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
   assert.equal(settings.providerAccounts.google.model, "gemma-4-26b-a4b-it");
+  assert.equal(settings.providerAccounts.groq.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(settings.providerAccounts.groq.model, "openai/gpt-oss-120b");
+  assert.equal(settings.providerAccounts.openrouter.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(settings.providerAccounts.openrouter.model, "openrouter/free");
+});
+
+test("getSettings migrates Groq and OpenRouter base URLs", async () => {
+  mockStorage({
+    baseUrl: "https://api.groq.com/openai/v1/",
+    apiKey: "groq-key",
+    model: "openai/gpt-oss-20b"
+  });
+  const groq = await getSettings();
+  assert.equal(groq.provider, "groq");
+  assert.equal(groq.apiKey, "groq-key");
+  assert.equal(groq.model, "openai/gpt-oss-20b");
+
+  mockStorage({
+    baseUrl: "https://openrouter.ai/api/v1/",
+    apiKey: "openrouter-key",
+    model: "openrouter/free"
+  });
+  const openrouter = await getSettings();
+  assert.equal(openrouter.provider, "openrouter");
+  assert.equal(openrouter.apiKey, "openrouter-key");
+  assert.equal(openrouter.model, "openrouter/free");
 });
 
 test("normalizeSettings accepts the NVIDIA rate limit toggle", () => {
   assert.equal(normalizeSettings({}).nvidiaRateLimit, true);
   assert.equal(normalizeSettings({ nvidiaRateLimit: false }).nvidiaRateLimit, false);
   assert.equal(normalizeSettings({ nvidiaRateLimit: "off" }).nvidiaRateLimit, false);
+});
+
+test("normalizeSettings includes configurable Google TPM, RPD, and RPM", () => {
+  const defaults = normalizeSettings({});
+  assert.equal(defaults.googleTpm, 150000);
+  assert.equal(defaults.googleRpd, 50);
+  assert.equal(defaults.googleRpm, 10);
+
+  const custom = normalizeSettings({
+    googleTpm: "200000",
+    googleRpd: "100",
+    googleRpm: "20"
+  });
+  assert.equal(custom.googleTpm, 200000);
+  assert.equal(custom.googleRpd, 100);
+  assert.equal(custom.googleRpm, 20);
+
+  const clamped = normalizeSettings({
+    googleTpm: 1,
+    googleRpd: 0,
+    googleRpm: 999999
+  });
+  assert.equal(clamped.googleTpm, 1000);
+  assert.equal(clamped.googleRpd, 1);
+  assert.equal(clamped.googleRpm, 100000);
 });
 
 test("normalizeSettings switches the active provider without losing the other account", () => {
@@ -183,6 +234,37 @@ test("getSettings migrates a legacy Google endpoint to the Google provider", asy
   assert.equal(settings.provider, "google");
   assert.equal(settings.model, "gemma-4-31b-it");
   assert.equal(settings.providerAccounts.google.apiKey, "google-key");
+});
+
+test("saveSettings switches between Groq and OpenRouter accounts", async () => {
+  mockStorage({
+    provider: "groq",
+    providerAccounts: {
+      groq: {
+        baseUrl: "https://api.groq.com/openai/v1",
+        apiKey: "groq-key",
+        model: "openai/gpt-oss-120b"
+      },
+      openrouter: {
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "openrouter-key",
+        model: "openrouter/free"
+      }
+    },
+    baseUrl: "https://api.groq.com/openai/v1",
+    apiKey: "groq-key",
+    model: "openai/gpt-oss-120b"
+  });
+
+  const openrouter = await saveSettings({ provider: "openrouter" });
+  assert.equal(openrouter.apiKey, "openrouter-key");
+  assert.equal(openrouter.model, "openrouter/free");
+  assert.equal(openrouter.providerAccounts.groq.apiKey, "groq-key");
+
+  const groq = await saveSettings({ provider: "groq" });
+  assert.equal(groq.apiKey, "groq-key");
+  assert.equal(groq.model, "openai/gpt-oss-120b");
+  assert.equal(groq.providerAccounts.openrouter.apiKey, "openrouter-key");
 });
 
 test("saveSettings switches providers and keeps per-provider credentials", async () => {

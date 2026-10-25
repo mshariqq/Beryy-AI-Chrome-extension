@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  GoogleRateLimiter,
   NVIDIA_RATE_LIMIT_RPM,
   SlidingWindowLimiter,
+  WeightedWindowLimiter,
+  acquireGoogleRateLimit,
   acquireNvidiaRateLimit,
+  resetGoogleRateLimiters,
   resetNvidiaRateLimiters,
   shouldLimitNvidia
 } from "../extension/shared/rate-limit.js";
@@ -67,4 +71,95 @@ test("NVIDIA rate limit acquisition is a no-op when disabled", async () => {
   resetNvidiaRateLimiters();
   await acquireNvidiaRateLimit({ provider: "google", nvidiaRateLimit: true });
   await acquireNvidiaRateLimit({ provider: "nvidia", nvidiaRateLimit: false });
+});
+
+test("weighted limiter waits for the token budget to expire", async () => {
+  let now = 0;
+  const waits = [];
+  const limiter = new WeightedWindowLimiter({
+    limit: 100,
+    windowMs: 1000,
+    bufferMs: 0,
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    }
+  });
+
+  await limiter.acquire({ weight: 60 });
+  await limiter.acquire({ weight: 40 });
+  await limiter.acquire({
+    weight: 10,
+    onWait: (ms) => {
+      if (ms > 0) waits.push(ms);
+    }
+  });
+
+  assert.deepEqual(waits, [1000]);
+});
+
+test("Google limiter enforces RPM before starting a request", async () => {
+  let now = 0;
+  const waits = [];
+  const limiter = new GoogleRateLimiter({
+    rpm: 2,
+    rpd: 100,
+    tpm: 1000000,
+    windowMs: 1000,
+    dayMs: 10000,
+    bufferMs: 0,
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    }
+  });
+
+  await limiter.acquire({ weight: 10 });
+  await limiter.acquire({ weight: 10 });
+  await limiter.acquire({
+    weight: 10,
+    onWait: (ms) => {
+      if (ms > 0) waits.push(ms);
+    }
+  });
+
+  assert.deepEqual(waits, [1000]);
+});
+
+test("Google limiter enforces RPD independently of RPM", async () => {
+  let now = 0;
+  const waits = [];
+  const limiter = new GoogleRateLimiter({
+    rpm: 100,
+    rpd: 2,
+    tpm: 1000000,
+    windowMs: 1000,
+    dayMs: 10000,
+    bufferMs: 0,
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    }
+  });
+
+  await limiter.acquire({ weight: 10 });
+  await limiter.acquire({ weight: 10 });
+  await limiter.acquire({
+    weight: 10,
+    onWait: (ms) => {
+      if (ms > 0) waits.push(ms);
+    }
+  });
+
+  assert.deepEqual(waits, [10000]);
+});
+
+test("Google rate limit acquisition is a no-op when all limits are zero", async () => {
+  resetGoogleRateLimiters();
+  await acquireGoogleRateLimit({
+    provider: "google",
+    googleTpm: 0,
+    googleRpd: 0,
+    googleRpm: 0
+  });
 });

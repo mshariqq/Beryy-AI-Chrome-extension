@@ -14,7 +14,7 @@
           <img class="logo" src="../icons/berry-logo.png" alt="" aria-hidden="true" />
           <div>
             <h1>Beryy settings</h1>
-            <p>Connect NVIDIA NIM or Google AI Studio. Everything stays in this Chrome profile.</p>
+            <p>Connect NVIDIA NIM, Google AI Studio, Groq, or OpenRouter. Everything stays in this Chrome profile.</p>
           </div>
         </div>
       </header>
@@ -25,7 +25,8 @@
           <p class="section-note">
             Keys and model choices are saved separately for each provider. Switch providers
             here or from the side panel. Any compatible
-            <code>/chat/completions</code> endpoint also works.
+            <code>/chat/completions</code> endpoint also works. Rate limits and temporary
+            provider outages are retried automatically with backoff.
           </p>
 
           <label class="field">
@@ -33,6 +34,8 @@
             <select id="provider" name="provider">
               <option value="nvidia">NVIDIA NIM</option>
               <option value="google">Google AI Studio</option>
+              <option value="groq">Groq</option>
+              <option value="openrouter">OpenRouter</option>
               <option value="custom">Custom endpoint</option>
             </select>
             <small id="provider-note"></small>
@@ -68,7 +71,7 @@
             </label>
             <label class="field">
               <span>Max agent steps</span>
-              <input id="maxSteps" name="maxSteps" type="number" min="1" max="40" step="1" />
+              <input id="maxSteps" name="maxSteps" type="number" min="1" max="800" step="1" />
             </label>
           </div>
 
@@ -94,6 +97,29 @@
               <small>Your API Rate Limit: Up to 40 rpm. When on, Beryy waits before sending requests that would go over the standard NVIDIA limit. Applies only to NVIDIA.</small>
             </span>
           </label>
+
+          <div class="field" id="google-rate-limit-row" hidden>
+            <span>Google API rate limits</span>
+            <div class="grid three">
+              <label class="field">
+                <span>Tokens per minute (TPM)</span>
+                <input id="googleTpm" name="googleTpm" type="number" min="1000" max="100000000" step="1000" />
+              </label>
+              <label class="field">
+                <span>Requests per day (RPD)</span>
+                <input id="googleRpd" name="googleRpd" type="number" min="1" max="1000000" step="1" />
+              </label>
+              <label class="field">
+                <span>Requests per minute (RPM)</span>
+                <input id="googleRpm" name="googleRpm" type="number" min="1" max="100000" step="1" />
+              </label>
+            </div>
+            <small>
+              Beryy waits before sending a request that would exceed these limits. TPM reserves
+              the estimated prompt plus max output tokens. Change these values to match your
+              Google project quota.
+            </small>
+          </div>
         </section>
 
         <section>

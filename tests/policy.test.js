@@ -45,6 +45,7 @@ test("maps tools and computer actions to permissions", () => {
   assert.equal(permissionTypeForTool("form_input"), PERMISSIONS.TYPE);
   assert.equal(permissionTypeForTool("javascript_tool"), PERMISSIONS.JAVASCRIPT);
   assert.equal(permissionTypeForTool("upload_image"), PERMISSIONS.UPLOAD);
+  assert.equal(permissionTypeForTool("file_upload"), PERMISSIONS.UPLOAD);
   assert.equal(permissionTypeForTool("tabs_close_mcp"), PERMISSIONS.CONTROL);
 
   assert.equal(

@@ -319,7 +319,11 @@ export class Agent {
       forcePrompt: true,
       onDelta: () => {},
       onRateLimitWait: (waitMs) =>
-        this.onEvent({ type: "rate_limit_wait", waitMs }),
+        this.onEvent({
+          type: "rate_limit_wait",
+          waitMs,
+          provider: this.settings.provider
+        }),
       onRetryWait: (retry) =>
         this.onEvent({ type: "provider_retry", ...retry })
     });
@@ -660,7 +664,11 @@ export class Agent {
             forcePrompt: this.promptMode,
             onDelta: (delta) => this.onEvent({ type: "assistant_delta", text: delta }),
             onRateLimitWait: (waitMs) =>
-              this.onEvent({ type: "rate_limit_wait", waitMs }),
+              this.onEvent({
+                type: "rate_limit_wait",
+                waitMs,
+                provider: this.settings.provider
+              }),
             onRetryWait: (retry) =>
               this.onEvent({ type: "provider_retry", ...retry })
           });

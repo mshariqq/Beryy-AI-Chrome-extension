@@ -85,6 +85,14 @@ function setStatus(text, busy = false) {
   statusEl.classList.toggle("busy", Boolean(busy));
 }
 
+function formatWait(ms) {
+  const seconds = Math.max(1, Math.ceil(Number(ms) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.ceil(minutes / 60)}h`;
+}
+
 function updateContextIndicator(percent) {
   const indicator = $("context-indicator");
   const percentEl = $("context-percent");
@@ -709,7 +717,7 @@ function handleAgentEvent(event, token) {
     case "rate_limit_wait":
       if (event.waitMs > 0) {
         setStatus(
-          `NVIDIA rate limit: waiting ${Math.ceil(event.waitMs / 1000)}s…`,
+          `${providerLabel(event.provider || settings.provider)} rate limit: waiting ${formatWait(event.waitMs)}…`,
           true
         );
       } else {
@@ -719,8 +727,11 @@ function handleAgentEvent(event, token) {
     case "provider_retry":
       if (event.waitMs > 0) {
         const reason = event.status === 429 ? "rate limit" : "temporary error";
+        const attempt = event.attempt
+          ? ` (attempt ${event.attempt}/${event.maxRetries})`
+          : "";
         setStatus(
-          `${providerLabel(settings.provider)} ${reason}: retrying in ${Math.ceil(event.waitMs / 1000)}s…`,
+          `${providerLabel(settings.provider)} ${reason}: retrying in ${formatWait(event.waitMs)}${attempt}…`,
           true
         );
       } else {

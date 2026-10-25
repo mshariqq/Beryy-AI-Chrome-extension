@@ -1,7 +1,7 @@
 {
   "name": "bery",
   "version": "0.1.0",
-  "description": "Beryy - A side-panel browser agent for Chrome that reads, clicks, types, and navigates the web with your permission. Supports NVIDIA NIM, Google AI Studio (Gemma), and any OpenAI-compatible endpoint. Features vision, auto context compaction, tracker blocking, persistent chats, and granular permissions.",
+  "description": "Beryy - A side-panel browser agent for Chrome that reads, clicks, types, and navigates the web with your permission. Supports NVIDIA NIM, Google AI Studio, Groq, OpenRouter, and any OpenAI-compatible endpoint. Features vision, auto context compaction, tracker blocking, persistent chats, and granular permissions.",
   "type": "module",
   "scripts": {
     "check": "node scripts/check.mjs",
@@ -18,6 +18,8 @@
     "browser-automation",
     "nvidia-nim",
     "google-ai-studio",
+    "groq",
+    "openrouter",
     "openai-compatible",
     "vision",
     "context-compaction",

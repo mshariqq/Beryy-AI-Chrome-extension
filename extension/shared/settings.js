@@ -21,6 +21,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   toolMode: "auto",
   vision: false,
   nvidiaRateLimit: true,
+  googleTpm: 150000,
+  googleRpd: 50,
+  googleRpm: 10,
   permissionMode: "ask",
   blockedDomains: [],
   trustedDomains: [],
@@ -60,8 +63,9 @@ function inferProvider(input) {
   if (Object.hasOwn(PROVIDERS, input.provider)) return input.provider;
 
   const baseUrl = String(input.baseUrl || "").trim().replace(/\/+$/, "");
-  if (baseUrl === PROVIDERS.google.baseUrl) return "google";
-  if (baseUrl === PROVIDERS.nvidia.baseUrl) return DEFAULT_PROVIDER;
+  for (const [id, preset] of Object.entries(PROVIDERS)) {
+    if (preset.baseUrl && baseUrl === preset.baseUrl) return id;
+  }
   if (baseUrl) return "custom";
   return DEFAULT_PROVIDER;
 }
@@ -115,10 +119,19 @@ export function normalizeSettings(input = {}) {
     model: active.model,
     temperature: clampNumber(merged.temperature, DEFAULT_SETTINGS.temperature, 0, 2),
     maxTokens: Math.round(clampNumber(merged.maxTokens, DEFAULT_SETTINGS.maxTokens, 64, 65536)),
-    maxSteps: Math.round(clampNumber(merged.maxSteps, DEFAULT_SETTINGS.maxSteps, 1, 40)),
+    maxSteps: Math.round(clampNumber(merged.maxSteps, DEFAULT_SETTINGS.maxSteps, 1, 800)),
     toolMode,
     vision: flag(merged.vision, DEFAULT_SETTINGS.vision),
     nvidiaRateLimit: flag(merged.nvidiaRateLimit, DEFAULT_SETTINGS.nvidiaRateLimit),
+    googleTpm: Math.round(
+      clampNumber(merged.googleTpm, DEFAULT_SETTINGS.googleTpm, 1000, 100000000)
+    ),
+    googleRpd: Math.round(
+      clampNumber(merged.googleRpd, DEFAULT_SETTINGS.googleRpd, 1, 1000000)
+    ),
+    googleRpm: Math.round(
+      clampNumber(merged.googleRpm, DEFAULT_SETTINGS.googleRpm, 1, 100000)
+    ),
     permissionMode,
     blockedDomains: list(merged.blockedDomains),
     trustedDomains: list(merged.trustedDomains),

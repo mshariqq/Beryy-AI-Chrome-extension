@@ -18,16 +18,18 @@ Beryy lives in your browser's side panel. You give it a goal — *"Find the pric
 
 | Feature | Details |
 |---------|---------|
-| **Multi-provider LLM support** | NVIDIA NIM, Google AI Studio (Gemma), or any OpenAI-compatible endpoint |
-| **Native tool use** | `navigate`, `read_page`, `find`, `form_input`, `click`, `scroll`, `get_page_text`, `tabs_context_mcp`, `switch_tab`, `close_tab`, `wait`, `screenshot` |
+| **Multi-provider LLM support** | NVIDIA NIM, Google AI Studio, Groq, OpenRouter, or any OpenAI-compatible endpoint |
+| **Native tool use** | 16 tools for navigation, page reading, clicking and typing, tabs, console/network inspection, screenshots, and plan updates |
+| **Cross-origin iframes** | Frame-aware refs, clicks, typing, text extraction, and nested OOPIF support |
+| **File uploads** | Attach local files to page or iframe file inputs with explicit upload permission |
 | **Vision** | Screenshots sent to vision-capable models (GPT-4o, Gemini, LLaVA, etc.) |
 | **Auto context compaction** | Summarizes history at 85% context window; keeps recent 30%, compresses the rest |
 | **Tracker blocking** | Declarative Net Request ruleset; allowlists for first-party assets |
 | **Anti-bot pacing** | Human-like delays with jitter; respects domain rules |
 | **Persistent chats** | Multi-conversation history with titles, restore on reload |
 | **Granular permissions** | Ask / Trusted domains / Session grant / Read-only modes |
-| **Dual provider accounts** | Separate API keys & models for NVIDIA and Google; switch instantly |
-| **Rate limiting** | Optional 40 RPM guard for NVIDIA NIM |
+| **Per-provider accounts** | Separate API keys & models for every provider; switch instantly |
+| **Rate limiting** | Optional 40 RPM guard for NVIDIA NIM; configurable Google TPM/RPD/RPM guards; automatic backoff for provider 429/5xx errors |
 
 ---
 
@@ -40,10 +42,11 @@ Beryy lives in your browser's side panel. You give it a goal — *"Find the pric
    npm install
    ```
    - Open Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select the `extension/` folder
+   - Chrome 125+ is recommended for cross-origin and nested iframe support; Chrome 116+ still supports same-process frames
 
 2. **Configure**  
    - Click the Beryy toolbar icon → **Options**  
-   - Choose provider: **NVIDIA NIM**, **Google AI Studio**, or **Custom**  
+   - Choose provider: **NVIDIA NIM**, **Google AI Studio**, **Groq**, **OpenRouter**, or **Custom**
    - Paste your API key, pick a model, save
 
 3. **Run**  
@@ -80,10 +83,10 @@ extension/
 │   └── options.css
 ├── shared/
 │   ├── settings.js        # Settings schema, migration, validation
-│   ├── providers.js       # Provider presets (NVIDIA, Google, Custom)
+│   ├── providers.js       # Provider presets (NVIDIA, Google, Groq, OpenRouter, Custom)
 │   ├── vision.js          # Vision capability detection
 │   ├── context.js         # Context estimation, compaction logic
-│   ├── rate-limit.js      # NVIDIA 40 RPM sliding window
+│   ├── rate-limit.js      # NVIDIA and Google request/token limiters
 │   ├── tools.js           # Tool definitions & prompt specs
 │   ├── prompt.js          # System prompt builder
 │   ├── sse.js             # SSE parser for streaming
@@ -105,10 +108,21 @@ User input → `Agent.run()` → `buildMessages()` → `streamChat()` (retries, 
 | Provider | Base URL | Default Model | Notes |
 |----------|----------|---------------|-------|
 | **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct` | 40 RPM limit (toggleable) |
-| **Google AI Studio** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemma-4-26b-a4b-it` | Free tier; `gemma-4-31b-it` also available |
+| **Google AI Studio** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemma-4-26b-a4b-it` | Free tier; configurable TPM/RPD/RPM |
+| **Groq** | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` | Fast OpenAI-compatible inference; free tier |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `openrouter/free` | One key for many models; free router |
 | **Custom** | Your OpenAI-compatible endpoint | — | Any `/v1/chat/completions` endpoint |
 
-> **Vision**: Only sent when `settings.vision=true` **and** the model matches a known vision pattern (GPT-4o, Gemini, LLaVA, etc.). Text-only models (Llama 3.x, Nemotron 3/4, etc.) never receive screenshots.
+### Free-tier notes
+
+Limits change; these were checked against provider documentation in October 2026.
+
+- **Groq (`openai/gpt-oss-120b`)**: about 30 RPM, 8K tokens/minute, 1,000 requests/day, and 200K tokens/day per organization. `retry-after` is returned on 429, and Beryy honors it.
+- **OpenRouter**: free model IDs and `openrouter/free` are limited to 20 requests/minute and 50 requests/day. Buying at least $10 of credits raises the daily cap to 1,000. Failed attempts count toward the cap. Some free models require enabling free-model publication in OpenRouter privacy settings.
+- **Google AI Studio**: free-tier quotas vary by model. Beryy defaults to **150,000 TPM**, **50 RPD**, and **10 RPM**, and waits before a request would exceed those limits. All three values are editable in Google settings; TPM reserves the estimated prompt plus max output tokens. Beryy also retries 429 and 503 responses automatically.
+- **NVIDIA NIM**: the optional 40 RPM guard spaces requests before they are sent; provider-side 429s are still retried with backoff.
+
+> **Vision**: Only sent when `settings.vision=true` **and** the model matches a known vision pattern (GPT-4o, Gemini, LLaVA, etc.). Text-only models (Llama 3.x, Nemotron 3/4, GPT-OSS, etc.) never receive screenshots. `openrouter/free` routes to a model that accepts the request's features.
 
 ---
 
@@ -116,12 +130,15 @@ User input → `Agent.run()` → `buildMessages()` → `streamChat()` (retries, 
 
 | Setting | Description |
 |---------|-------------|
-| `provider` | Active provider: `nvidia`, `google`, `custom` |
+| `provider` | Active provider: `nvidia`, `google`, `groq`, `openrouter`, `custom` |
 | `providerAccounts` | Per-provider `{baseUrl, apiKey, model}` |
 | `nvidiaRateLimit` | Enforce 40 RPM for NVIDIA (default: on) |
+| `googleTpm` | Google tokens per minute guard (default: 150000) |
+| `googleRpd` | Google requests per day guard (default: 50) |
+| `googleRpm` | Google requests per minute guard (default: 10) |
 | `vision` | Enable screenshot upload for vision models |
 | `toolMode` | `auto` (native tools) / `prompt` (XML fallback) |
-| `maxSteps` | Max agent steps per turn (default: 20) |
+| `maxSteps` | Max agent steps per turn (default: 12, max: 800) |
 | `maxTokens` | Output token limit |
 | `temperature` | Sampling temperature |
 | `blockedDomains` | Comma-separated domains to block |
@@ -135,12 +152,12 @@ User input → `Agent.run()` → `buildMessages()` → `streamChat()` (retries, 
 ## Testing
 
 ```bash
-npm run verify   # lint + unit tests (95 tests)
+npm run verify   # lint + unit tests
 ```
 
 Tests cover:
 - Settings migration & validation
-- Provider streaming, retries, rate limits
+- Provider streaming, `Retry-After`/backoff retries, and rate limits
 - Agent loop, tool execution, context compaction
 - Vision gating, screenshot pruning
 - Tracker blocking & DNR allowlist
@@ -153,7 +170,7 @@ Tests cover:
 - **No telemetry** — zero network calls except to your configured LLM endpoint
 - **API keys stored locally** in `chrome.storage.local` (never synced)
 - **All URLs allowed** by `<all_urls>` host permission; you control which sites the agent visits
-- **No hardcoded secrets** — placeholders only (`nvapi-…`, `AIza…`)
+- **No hardcoded secrets** — placeholders only (`nvapi-…`, `AIza…`, `gsk_…`, `sk-or-v1-…`)
 - **Content Security Policy** compliant — no inline scripts, no `eval`
 
 ---

@@ -94,7 +94,7 @@ export function permissionTypeForTool(tool, args = {}) {
   if (tool === "navigate") return PERMISSIONS.NAVIGATE;
   if (tool === "form_input") return PERMISSIONS.TYPE;
   if (tool === "javascript_tool") return PERMISSIONS.JAVASCRIPT;
-  if (tool === "upload_image") return PERMISSIONS.UPLOAD;
+  if (tool === "upload_image" || tool === "file_upload") return PERMISSIONS.UPLOAD;
 
   if (tool === "computer") {
     const action = String(args.action || "");
@@ -222,5 +222,6 @@ export function describeAction(tool, args = {}) {
   if (tool === "form_input") return `set ${args.ref || "a field"}`;
   if (tool === "javascript_tool") return "run JavaScript in the page";
   if (tool === "upload_image") return `attach an image to ${args.ref || "a file input"}`;
+  if (tool === "file_upload") return `upload ${(args.paths || []).length || "a"} file(s) to ${args.ref || "a file input"}`;
   return tool;
 }

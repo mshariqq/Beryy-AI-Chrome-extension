@@ -5,6 +5,28 @@
   if (window.__beryContentLoaded) return;
   window.__beryContentLoaded = true;
 
+  const isTopFrame = (() => {
+    try {
+      return !window.top || window.top === window;
+    } catch {
+      return true;
+    }
+  })();
+  const frameToken = `f${Math.random().toString(36).slice(2, 8)}`;
+  const frameDepth = (() => {
+    let depth = 0;
+    let current = window;
+    try {
+      while (current.parent && current.parent !== current && depth < 50) {
+        depth += 1;
+        current = current.parent;
+      }
+    } catch {
+      // Cross-origin parent access is limited; keep the depth found so far.
+    }
+    return depth;
+  })();
+
   let refCounter = 0;
   const elementMap = Object.create(null);
   const reverseMap = new WeakMap();
@@ -70,7 +92,9 @@
   function getOrAssignRef(element) {
     const existing = reverseMap.get(element);
     if (existing && elementMap[existing]?.deref() === element) return existing;
-    const ref = `ref_${++refCounter}`;
+    const ref = isTopFrame
+      ? `ref_${++refCounter}`
+      : `ref_${frameToken}_${++refCounter}`;
     elementMap[ref] = new WeakRef(element);
     reverseMap.set(element, ref);
     return ref;
@@ -190,6 +214,49 @@
     const ref = reverseMap.get(element);
     const name = getAccessibleName(element);
     return `<${tag}${ref ? ` ${ref}` : ""}${name ? ` "${name.slice(0, 60)}"` : ""}>`;
+  }
+
+  function elementState(element) {
+    if (!element) return null;
+    const tag = element.tagName.toLowerCase();
+    return {
+      description: describeElement(element),
+      role: getRole(element) || tag,
+      name: getAccessibleName(element).slice(0, 160),
+      text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 160),
+      ariaLabel: element.getAttribute("aria-label") || "",
+      ariaPressed: element.getAttribute("aria-pressed") || "",
+      ariaExpanded: element.getAttribute("aria-expanded") || "",
+      ariaChecked: element.getAttribute("aria-checked") || "",
+      disabled:
+        Boolean(element.disabled) || element.getAttribute("aria-disabled") === "true",
+      checked: element.checked === true
+    };
+  }
+
+  function elementContext(element, cache) {
+    let node = element.parentElement;
+    for (let depth = 0; depth < 10 && node; depth += 1) {
+      if (node === document.body || node === document.documentElement) break;
+      const label = node.getAttribute?.("aria-label");
+      if (label && label.length <= 160 && /post|article|feed/i.test(label)) {
+        return label.trim();
+      }
+      node = node.parentElement;
+    }
+
+    const container =
+      element.closest?.(
+        '[data-urn^="urn:li:activity"], article, [role="article"], .feed-shared-update-v2, [data-urn]'
+      ) || element.closest?.(".comments-comment-item, li");
+    if (!container) return "";
+    if (cache?.has(container)) return cache.get(container);
+    const text = String(container.innerText || container.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 90);
+    cache?.set(container, text);
+    return text;
   }
 
   function deepQueryAll(root, selector) {
@@ -377,7 +444,16 @@ function getRefCoordinates(ref, scrollIntoView = true) {
           y,
           rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
           tag: element.tagName.toLowerCase(),
+          role: getRole(element) || element.tagName.toLowerCase(),
+          name: getAccessibleName(element).slice(0, 120),
+          description: describeElement(element),
           text: (element.textContent || "").trim().slice(0, 80),
+          state: elementState(element),
+          onscreen:
+            rect.top + rect.height > 0 &&
+            rect.left + rect.width > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth,
           coveredBy
         });
       }, 50);
@@ -390,6 +466,80 @@ function scrollToRef(ref) {
       return result;
     });
   }
+
+  function actionableElement(element) {
+    let node = element;
+    for (let depth = 0; depth < 5 && node; depth += 1) {
+      const tag = node.tagName?.toLowerCase();
+      if (
+        isInteractive(node) ||
+        ["button", "a", "input", "textarea", "select", "label"].includes(tag)
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return element;
+  }
+
+  function getPointState(x, y) {
+    const px = Number(x);
+    const py = Number(y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const hit = document.elementFromPoint(px, py);
+    if (!hit) return null;
+    const element = actionableElement(hit);
+    return { x: px, y: py, ...elementState(element) };
+  }
+
+  function getRefState(ref) {
+    const element = resolveRef(ref);
+    return element ? elementState(element) : null;
+  }
+
+  function focusRef(ref) {
+    const element = resolveRef(ref);
+    if (!element) return false;
+    const control = findControl(element) || element;
+    try {
+      control.focus({ preventScroll: false });
+    } catch {
+      // Fall through to the plain focus call.
+    }
+    if (document.activeElement !== control) {
+      try {
+        control.focus();
+      } catch {
+        // Ignore focus failures.
+      }
+    }
+    return document.activeElement === control || control.contains(document.activeElement);
+  }
+
+  function getFocusInfo() {
+    const active = document.activeElement;
+    if (!active || active === document.body || active === document.documentElement) {
+      return {
+        token: frameToken,
+        isTopFrame,
+        active: false,
+        editable: false,
+        focused: document.hasFocus(),
+        tag: ""
+      };
+    }
+    const editable = Boolean(active.isContentEditable) ||
+      ["input", "textarea", "select"].includes(active.tagName.toLowerCase());
+    return {
+      token: frameToken,
+      isTopFrame,
+      active: true,
+      editable,
+      focused: document.hasFocus(),
+      tag: active.tagName.toLowerCase()
+    };
+  }
+
 
   function dispatchInputEvents(element) {
     element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
@@ -498,12 +648,21 @@ function scrollToRef(ref) {
     return `Title: ${document.title}\nURL: ${location.href}\nSource element: <${best ? best.tagName.toLowerCase() : "body"}>\n---\n${clipped}`;
   }
 
-  function findElements(query) {
+  function findElements(query, options = {}) {
     const rawQuery = String(query || "").trim().toLowerCase();
     if (!rawQuery) return "Provide a query, e.g. 'search bar' or 'Sign in'.";
     const tokens = rawQuery.split(/\s+/).filter(Boolean);
+    const offsetX = Number(options.offsetX) || 0;
+    const offsetY = Number(options.offsetY) || 0;
+    const viewportWidth = Number.isFinite(Number(options.viewportWidth))
+      ? Number(options.viewportWidth)
+      : window.innerWidth;
+    const viewportHeight = Number.isFinite(Number(options.viewportHeight))
+      ? Number(options.viewportHeight)
+      : window.innerHeight;
 
     const candidates = [];
+    const contextCache = new WeakMap();
     let visited = 0;
 
     const visit = (root) => {
@@ -540,14 +699,34 @@ function scrollToRef(ref) {
 
         const rect = element.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
+        const left = rect.left + offsetX;
+        const top = rect.top + offsetY;
+
+        const context = elementContext(element, contextCache);
+        if (context) {
+          const contextLower = context.toLowerCase();
+          if (contextLower.includes(rawQuery)) score += 6;
+          for (const token of tokens) {
+            if (contextLower.includes(token)) score += 2;
+          }
+        }
+
+        const onscreen =
+          top + rect.height > 0 &&
+          left + rect.width > 0 &&
+          top < viewportHeight &&
+          left < viewportWidth;
+        if (onscreen) score += 24;
 
         candidates.push({
           element,
           score,
           role: role || tag,
           name: getAccessibleName(element).slice(0, 80),
-          x: Math.round(rect.left + rect.width / 2),
-          y: Math.round(rect.top + rect.height / 2)
+          context,
+          onscreen,
+          x: Math.round(left + rect.width / 2),
+          y: Math.round(top + rect.height / 2)
         });
       }
 
@@ -558,7 +737,10 @@ function scrollToRef(ref) {
 
     visit(document.body || document.documentElement);
 
-    candidates.sort((a, b) => b.score - a.score);
+    candidates.sort((a, b) => {
+      if (a.onscreen !== b.onscreen) return a.onscreen ? -1 : 1;
+      return b.score - a.score || a.y - b.y;
+    });
     const top = candidates.slice(0, 20);
     if (!top.length) {
       return `No elements matched "${query}". Try a different phrase, or use read_page to inspect the page.`;
@@ -566,21 +748,56 @@ function scrollToRef(ref) {
 
     const lines = top.map((item, index) => {
       const ref = getOrAssignRef(item.element);
-      const extra = item.role === "link" ? "" : "";
-      return `${index + 1}. [${ref}] ${item.role} "${item.name}" at (${item.x}, ${item.y})${extra}`;
+      const where = item.onscreen
+        ? `at (${item.x}, ${item.y})`
+        : "offscreen; click the ref to scroll it into view";
+      const context = item.context ? ` — context: "${item.context}"` : "";
+      return `${index + 1}. [${ref}] ${item.role} "${item.name}" ${where}${context}`;
     });
 
     return `Found ${top.length} match${top.length === 1 ? "" : "es"} for "${query}":\n${lines.join("\n")}`;
   }
 
-  async function setFileInputFromDataUrl(ref, dataUrl, filename) {
+  function fileInputFor(ref) {
     const element = resolveRef(ref);
-    if (!element) throw new Error(`${ref} was not found. Call read_page again.`);
+    if (!element) return null;
+    if (element.tagName.toLowerCase() === "input" && element.type === "file") return element;
+    return deepQueryAll(element.shadowRoot || element, "input[type='file']")[0] || null;
+  }
 
-    let input = element;
-    if (input.tagName.toLowerCase() !== "input" || input.type !== "file") {
-      input = deepQueryAll(element.shadowRoot || element, "input[type='file']")[0];
-    }
+  function fileInputsInFrame() {
+    return deepQueryAll(document, "input[type='file']");
+  }
+
+  function getFileInputInfo(ref) {
+    const input = fileInputFor(ref);
+    if (!input) throw new Error(`${ref} is not a file input.`);
+    const inputs = fileInputsInFrame();
+    const index = inputs.indexOf(input);
+    if (index < 0) throw new Error(`${ref} is not a file input.`);
+    return {
+      index,
+      token: frameToken,
+      url: location.href,
+      name: input.name || "",
+      accept: input.accept || "",
+      multiple: Boolean(input.multiple)
+    };
+  }
+
+  function fileInputByIndex(index) {
+    return fileInputsInFrame()[Number(index)] || null;
+  }
+
+  function notifyFileInput(index) {
+    const input = fileInputByIndex(index);
+    if (!input) return false;
+    dispatchInputEvents(input);
+    return true;
+  }
+
+  async function setFileInputFromDataUrl(ref, dataUrl, filename) {
+    const input = fileInputFor(ref);
     if (!input) throw new Error(`${ref} is not a file input.`);
 
     const response = await fetch(dataUrl);
@@ -599,6 +816,14 @@ function scrollToRef(ref) {
         return generateAccessibilityTree(message.options || {});
       case "getRefCoordinates":
         return getRefCoordinates(message.ref, message.scrollIntoView !== false);
+      case "getRefState":
+        return getRefState(message.ref);
+      case "focusRef":
+        return focusRef(message.ref);
+      case "getFocusInfo":
+        return getFocusInfo();
+      case "getPointState":
+        return getPointState(message.x, message.y);
       case "scrollToRef":
         return scrollToRef(message.ref);
       case "setFormInput":
@@ -606,13 +831,32 @@ function scrollToRef(ref) {
       case "getPageText":
         return getPageText(message.maxChars);
       case "findElements":
-        return findElements(message.query);
+        return findElements(message.query, message.options);
+      case "getFrameInfo":
+        return {
+          token: frameToken,
+          isTopFrame,
+          depth: frameDepth,
+          url: location.href,
+          title: document.title
+        };
+      case "getFileInputInfo":
+        return getFileInputInfo(message.ref);
       case "setFileInputFromDataUrl":
         return setFileInputFromDataUrl(message.ref, message.dataUrl, message.filename);
       default:
         throw new Error(`Unknown content message: ${message?.type}`);
     }
   }
+
+  window.__beryContent = {
+    frameToken,
+    isTopFrame,
+    depth: frameDepth,
+    handleMessage,
+    fileInputByIndex,
+    notifyFileInput
+  };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.resolve()

@@ -247,6 +247,7 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
+  cdp.handleEvent(source.tabId, method, params, source.sessionId);
   events.handleEvent(source.tabId, method, params);
 });
 

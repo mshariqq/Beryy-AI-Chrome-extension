@@ -7,8 +7,8 @@ import {
   getTool
 } from "../extension/shared/tools.js";
 
-test("exposes 15 uniquely named tools", () => {
-  assert.equal(TOOLS.length, 15);
+test("exposes 16 uniquely named tools", () => {
+  assert.equal(TOOLS.length, 16);
   assert.equal(TOOL_NAMES.size, TOOLS.length);
   for (const tool of TOOLS) {
     assert.equal(tool.type, "function");
@@ -46,7 +46,8 @@ test("includes the core browser tools", () => {
     "read_network_requests",
     "resize_window",
     "set_tab_focus",
-    "upload_image"
+    "upload_image",
+    "file_upload"
   ]) {
     assert.ok(TOOL_NAMES.has(name), `missing tool ${name}`);
   }

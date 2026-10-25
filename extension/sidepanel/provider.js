@@ -1,8 +1,13 @@
 import { createSSEParser, isDoneEvent, parseJSONEvent } from "../shared/sse.js";
 import {
   abortableSleep,
-  acquireNvidiaRateLimit
+  acquireNvidiaRateLimit,
+  acquireProviderRateLimit
 } from "../shared/rate-limit.js";
+import {
+  estimateMessagesTokens,
+  estimateTextTokens
+} from "../shared/context.js";
 import { buildPromptToolSpec } from "../shared/tools.js";
 
 export const REQUEST_TIMEOUT_MS = 60000;
@@ -10,15 +15,74 @@ export const STREAM_IDLE_MS = 90000;
 export const GOOGLE_REQUEST_TIMEOUT_MS = 180000;
 export const GOOGLE_STREAM_IDLE_MS = 120000;
 
-const MAX_TRANSIENT_RETRIES = 2;
+const MAX_RATE_LIMIT_RETRIES = 4;
+const MAX_TRANSIENT_RETRIES = 6;
+const MAX_RETRY_WAIT_MS = 120000;
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 export class ProviderError extends Error {
-  constructor(message, { status = 0, body = "" } = {}) {
+  constructor(message, { status = 0, body = "", retryAfterMs = 0 } = {}) {
     super(message);
     this.name = "ProviderError";
     this.status = status;
     this.body = body;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+function maxRetriesFor(status) {
+  return status === 429 ? MAX_RATE_LIMIT_RETRIES : MAX_TRANSIENT_RETRIES;
+}
+
+function parseRetryAfter(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    return Math.ceil(Number(text) * 1000);
+  }
+
+  const timestamp = Date.parse(text);
+  if (Number.isFinite(timestamp)) return Math.max(0, timestamp - Date.now());
+  return 0;
+}
+
+function parseDurationMs(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    return Math.ceil(Number(text) * 1000);
+  }
+
+  let total = 0;
+  let matched = false;
+  const pattern = /(\d+(?:\.\d+)?)\s*(ms|s|m|h)/gi;
+  let match;
+  while ((match = pattern.exec(text))) {
+    matched = true;
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const multiplier = unit === "h" ? 3600000 : unit === "m" ? 60000 : unit === "ms" ? 1 : 1000;
+    total += amount * multiplier;
+  }
+  return matched ? Math.ceil(total) : 0;
+}
+
+function responseRetryAfterMs(response) {
+  const headers = response?.headers;
+  if (typeof headers?.get !== "function") return 0;
+
+  const direct = parseRetryAfter(headers.get("retry-after"));
+  if (direct > 0) return direct;
+
+  for (const name of [
+    "x-ratelimit-reset-tokens",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-reset"
+  ]) {
+    const parsed = parseDurationMs(headers.get(name));
+    if (parsed > 0) return parsed;
+  }
+  return 0;
 }
 
 export class ProviderTimeoutError extends ProviderError {
@@ -46,8 +110,18 @@ function errorMessage(body, fallback) {
 function providerErrorMessage(status, body, settings = {}) {
   const fallback = `Request failed (${status}).`;
   const message = errorMessage(body, fallback);
-  const google = settings.provider === "google";
+  const provider = settings.provider || "";
 
+  if (status === 402 && provider === "openrouter") {
+    return "OpenRouter rejected the request for insufficient credits. Add credits or choose a free model.";
+  }
+  if (
+    status === 404 &&
+    provider === "openrouter" &&
+    /data policy|free model publication/i.test(body)
+  ) {
+    return "OpenRouter blocked this free model under your privacy settings. Allow free-model publication in OpenRouter privacy settings, or choose another model.";
+  }
   if (status === 404 && /Function .*Not found for account/i.test(body)) {
     return "This model is listed by the provider, but it is not available for your account. Choose another model or request access from the provider.";
   }
@@ -61,11 +135,18 @@ function providerErrorMessage(status, body, settings = {}) {
     return `${message} Check that your API key is valid and has access to this model.`;
   }
   if (status === 429) {
-    return google
-      ? `${message} Google's free-tier quota may be exhausted. Wait for it to reset or choose a different Google model.`
-      : `${message} Rate limit reached; wait a moment and retry.`;
+    if (provider === "google") {
+      return `${message} Google's free-tier quota may be exhausted. Wait for it to reset or choose a different Google model.`;
+    }
+    if (provider === "groq") {
+      return `${message} Groq's free-tier limit may be exhausted. Wait for the window to reset or choose another Groq model.`;
+    }
+    if (provider === "openrouter") {
+      return `${message} OpenRouter's free-model limit may be exhausted. Wait for the window to reset or add credits.`;
+    }
+    return `${message} Rate limit reached; wait a moment and retry.`;
   }
-  if (status === 500 || status === 503) {
+  if (status === 500 || status === 502 || status === 503 || status === 504) {
     return `${message} The provider is temporarily unavailable. Retrying may help.`;
   }
 
@@ -81,16 +162,20 @@ function timeoutMessage(settings, timeoutMs) {
 }
 
 function retryDelayMs(error, attempt) {
+  if (Number(error?.retryAfterMs) > 0) {
+    return Math.min(MAX_RETRY_WAIT_MS, Math.ceil(Number(error.retryAfterMs)) + 250);
+  }
+
   const detail = `${error?.body || ""} ${error?.message || ""}`;
   const retryInfo = detail.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
 
   if (retryInfo) {
-    return Math.min(90000, Math.ceil(Number(retryInfo[1]) * 1000) + 250);
+    return Math.min(MAX_RETRY_WAIT_MS, Math.ceil(Number(retryInfo[1]) * 1000) + 250);
   }
   if (error?.status === 429) {
-    return Math.min(60000, 15000 * 2 ** attempt);
+    return Math.min(60000, 10000 * 2 ** attempt);
   }
-  return Math.min(8000, 1000 * 2 ** attempt);
+  return Math.min(15000, 1000 * 2 ** attempt);
 }
 
 export async function listModels(settings) {
@@ -117,7 +202,11 @@ export async function listModels(settings) {
       const raw = await response.text().catch(() => "");
       throw new ProviderError(
         providerErrorMessage(response.status, raw, settings),
-        { status: response.status, body: raw }
+        {
+          status: response.status,
+          body: raw,
+          retryAfterMs: responseRetryAfterMs(response)
+        }
       );
     }
 
@@ -298,9 +387,15 @@ async function request({
     body.tool_choice = "auto";
   }
 
-  await acquireNvidiaRateLimit(settings, {
+  const estimatedTokens =
+    estimateMessagesTokens(body.messages) +
+    estimateTextTokens(JSON.stringify(body.tools || [])) +
+    (Number(settings.maxTokens) || 0);
+
+  await acquireProviderRateLimit(settings, {
     onWait: onRateLimitWait,
-    signal
+    signal,
+    weight: estimatedTokens
   });
 
   const controller = new AbortController();
@@ -343,7 +438,8 @@ async function request({
     const raw = await response.text().catch(() => "");
     throw new ProviderError(providerErrorMessage(response.status, raw, settings), {
       status: response.status,
-      body: raw
+      body: raw,
+      retryAfterMs: responseRetryAfterMs(response)
     });
   }
 
@@ -504,16 +600,19 @@ export async function streamChat({
     } catch (error) {
       if (error?.name === "AbortError" || signal?.aborted) throw error;
 
-      if (
-        [429, 500, 503].includes(error?.status) &&
-        transientRetries < MAX_TRANSIENT_RETRIES
-      ) {
+      const maxRetries = maxRetriesFor(error?.status);
+      if (RETRYABLE_STATUSES.has(error?.status) && transientRetries < maxRetries) {
         const waitMs = retryDelayMs(error, transientRetries);
-        onRetryWait?.({ waitMs, status: error.status });
+        const attempt = transientRetries + 1;
+        onRetryWait?.({ waitMs, status: error.status, attempt, maxRetries });
         await abortableSleep(waitMs, signal);
-        onRetryWait?.({ waitMs: 0, status: error.status });
+        onRetryWait?.({ waitMs: 0, status: error.status, attempt, maxRetries });
         transientRetries += 1;
         continue;
+      }
+
+      if (transientRetries > 0 && RETRYABLE_STATUSES.has(error?.status)) {
+        error.message = `${error.message} Beryy retried ${transientRetries} time${transientRetries === 1 ? "" : "s"} automatically.`;
       }
 
       const toolRelated = /tool|function/i.test(

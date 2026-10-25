@@ -67,7 +67,7 @@ export const TOOLS = [
 
   fn(
     "computer",
-    "Mouse, keyboard, scrolling, and screenshots. Prefer element refs from read_page/find over coordinates when possible. Screenshots are returned by the screenshot, scroll, and zoom actions. Coordinates are CSS pixels in the latest screenshot.",
+    "Mouse, keyboard, scrolling, and screenshots. Prefer element refs from read_page/find over coordinates when possible. Screenshots are returned by screenshot, scroll, zoom, and click actions. Click results name the element under the pointer and report any accessible state change. Coordinates are CSS pixels in the latest screenshot.",
     {
       type: "object",
       properties: {
@@ -153,7 +153,7 @@ export const TOOLS = [
 
   fn(
     "read_page",
-    "Get an accessibility tree of the page with stable element refs. Use this to understand the page and to get refs for form_input and ref-based clicks.",
+    "Get an accessibility tree of the page with stable element refs. Includes same-origin and cross-origin iframe content under Frame headers. Use this to understand the page and to get refs for form_input, file_upload, and ref-based clicks.",
     {
       type: "object",
       properties: {
@@ -176,7 +176,7 @@ export const TOOLS = [
 
   fn(
     "get_page_text",
-    "Extract the main readable text of the page (article/main content first).",
+    "Extract the main readable text of the page (article/main content first). Includes substantial text from iframes.",
     {
       type: "object",
       properties: {
@@ -188,7 +188,7 @@ export const TOOLS = [
 
   fn(
     "find",
-    "Find elements by natural-language purpose or text. Returns up to 20 matches with refs and coordinates. Use this before clicking when the target is not obvious.",
+    "Find elements by natural-language purpose or text across the page and its iframes. Returns up to 20 matches per frame, in-viewport first, with refs and nearby post/container context. Off-screen matches show no coordinates; click their ref or scroll first. Use this before clicking when the target is not obvious.",
     {
       type: "object",
       properties: {
@@ -295,6 +295,24 @@ export const TOOLS = [
         filename: { type: "string", description: "Optional filename." }
       },
       required: ["imageId", "ref"]
+    }
+  ),
+
+  fn(
+    "file_upload",
+    "Upload one or more local files (by absolute path) to a file input element. Use read_page or find to locate the input, then pass its ref. Do not click file inputs; that opens a native picker Beryy cannot see. Keep the combined size under ~10 MB.",
+    {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Absolute paths to local files, e.g. ['C:\\\\Users\\\\me\\\\report.pdf']."
+        },
+        ref: { type: "string", description: "File input element ref from read_page or find." },
+        tabId
+      },
+      required: ["paths", "ref"]
     }
   )
 ];
