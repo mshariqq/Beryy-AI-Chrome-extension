@@ -84,6 +84,11 @@ function normalizeHistory(history) {
   for (const item of history) {
     if (!item || typeof item !== "object") continue;
 
+    if (item.role === "system") {
+      output.push({ role: "system", content: clampText(item.content) });
+      continue;
+    }
+
     if (item.role === "user") {
       output.push({ role: "user", content: historyContent(item.content) });
       continue;

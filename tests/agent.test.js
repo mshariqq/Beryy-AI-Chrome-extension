@@ -377,12 +377,64 @@ test("agent summarizes history when context reaches 85 percent", async () => {
   assert.equal(calls[0].settings.toolMode, "prompt");
   assert.match(calls[0].messages.at(-1).content, /Write the summary now/);
   assert.equal(calls[1].messages[0].role, "system");
-  assert.match(calls[1].messages[1].content, /Conversation summary/);
-  assert.match(calls[1].messages[1].content, /COMPACT SUMMARY/);
+  assert.match(calls[1].messages[0].content, /Conversation summary/);
+  assert.match(calls[1].messages[0].content, /COMPACT SUMMARY/);
   assert.ok(agent.history[0].content.startsWith("[Conversation summary"));
   assert.ok(events.some((event) => event.type === "compression_start"));
   assert.ok(events.some((event) => event.type === "compression_done"));
   assert.ok(events.some((event) => event.type === "notice" && /85%/.test(event.text)));
+});
+
+test("compression keeps the previous summary in saved state and later summaries", async () => {
+  const calls = [];
+  const agent = new Agent({
+    settings: settings(),
+    contextWindow: 3000,
+    execute: async () => ({ content: [] }),
+    onEvent: () => {},
+    stream: async (options) => {
+      calls.push(options);
+      return {
+        content: "NEW SUMMARY",
+        rawContent: "NEW SUMMARY",
+        toolCalls: [],
+        finishReason: "stop",
+        mode: "prompt"
+      };
+    }
+  });
+  agent.history = [
+    { role: "system", content: "[Conversation summary] OLD SUMMARY" }
+  ];
+  for (let index = 0; index < 6; index += 1) {
+    agent.history.push({ role: "user", content: `task ${index}` });
+    agent.history.push({
+      role: "assistant",
+      content: "x".repeat(1000),
+      toolCalls: []
+    });
+  }
+
+  const state = agent.getState();
+  assert.equal(state.history[0].role, "system");
+  assert.match(state.history[0].content, /OLD SUMMARY/);
+
+  const restored = new Agent({
+    settings: settings(),
+    execute: async () => ({ content: [] }),
+    onEvent: () => {}
+  });
+  restored.loadState(state);
+  assert.match(restored.history[0].content, /OLD SUMMARY/);
+  assert.match(restored.buildMessages({ tabs: [] })[0].content, /OLD SUMMARY/);
+
+  const changed = await agent.compressHistory({
+    signal: new AbortController().signal
+  });
+
+  assert.equal(changed, true);
+  assert.match(calls[0].messages.at(-1).content, /OLD SUMMARY/);
+  assert.match(agent.buildMessages({ tabs: [] })[0].content, /NEW SUMMARY/);
 });
 
 test("agent compacts when the provider reports 85 percent usage", async () => {
@@ -418,6 +470,35 @@ test("agent compacts when the provider reports 85 percent usage", async () => {
   assert.equal(calls[0].settings.toolMode, "prompt");
   assert.ok(agent.history[0].content.startsWith("[Conversation summary"));
   assert.equal(agent.lastPromptTokens, 0);
+});
+
+test("context usage reports calibrated estimates and actual provider usage", async () => {
+  const events = [];
+  const agent = new Agent({
+    settings: settings({ maxSteps: 1 }),
+    contextWindow: 10000,
+    execute: async () => ({ content: [] }),
+    onEvent: (event) => events.push(event),
+    stream: async () => ({
+      content: "ok",
+      rawContent: "ok",
+      toolCalls: [],
+      finishReason: "stop",
+      mode: "prompt",
+      usage: { prompt_tokens: 9000 }
+    })
+  });
+  agent.tokenCalibration = 1.5;
+
+  await agent.run("hello", { tabs: [] });
+
+  const usage = events.filter((event) => event.type === "context_usage");
+  assert.equal(usage.length, 2);
+  assert.equal(usage[0].estimated, Math.round(agent.lastRequestEstimate * 1.5));
+  assert.equal(usage[0].percent, Math.round((usage[0].estimated / 10000) * 100));
+  assert.equal(usage[1].actual, true);
+  assert.equal(usage[1].estimated, 9000);
+  assert.equal(usage[1].percent, 90);
 });
 
 test("context-length errors compact history and retry once", async () => {

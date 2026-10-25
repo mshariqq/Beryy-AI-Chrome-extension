@@ -249,6 +249,11 @@ export class Agent {
     const blocks = [];
 
     for (const item of history) {
+      if (item?.role === "system") {
+        blocks.push(`PRIOR SUMMARY:\n${clipText(String(item.content ?? ""), 8000)}`);
+        continue;
+      }
+
       if (item?.role === "user") {
         blocks.push(`USER:\n${clipText(contentToText(item.content), 6000)}`);
         continue;
@@ -395,6 +400,11 @@ export class Agent {
     for (const item of this.history) {
       if (!item || typeof item !== "object") continue;
 
+      if (item.role === "system") {
+        history.push({ role: "system", content: String(item.content ?? "") });
+        continue;
+      }
+
       if (item.role === "user") {
         let content = item.content;
         if (Array.isArray(content)) {
@@ -454,6 +464,10 @@ export class Agent {
     this.history = state.history
       .filter((item) => item && typeof item === "object")
       .map((item) => {
+        if (item.role === "system") {
+          return { role: "system", content: String(item.content ?? "") };
+        }
+
         if (item.role === "assistant") {
           return {
             role: "assistant",
@@ -542,15 +556,22 @@ export class Agent {
 
   buildMessages(tabContext) {
     const promptMode = this.promptMode || this.settings.toolMode === "prompt";
-    const system = buildSystemPrompt({
+    const base = buildSystemPrompt({
       settings: this.settings,
       tabContext,
       promptMode
     });
+    const summaries = this.history
+      .filter((item) => item?.role === "system" && item.content)
+      .map((item) => String(item.content))
+      .join("\n\n");
+    const system = summaries ? `${base}\n\n${summaries}` : base;
 
     const messages = [{ role: "system", content: system }];
 
     for (const item of this.history) {
+      if (item.role === "system") continue;
+
       if (item.role === "assistant") {
         if (promptMode) {
           let content = item.rawContent || item.content || "";
@@ -622,10 +643,13 @@ export class Agent {
           const messages = this.buildMessages(tabContext);
           this.lastRequestEstimate = estimateMessagesTokens(messages);
           const limit = this.contextLimit();
+          const estimated = Math.round(
+            this.lastRequestEstimate * this.tokenCalibration
+          );
           this.onEvent({
             type: "context_usage",
-            percent: Math.min(100, Math.round((this.lastRequestEstimate / limit) * 100)),
-            estimated: this.lastRequestEstimate,
+            percent: Math.min(100, Math.round((estimated / limit) * 100)),
+            estimated,
             limit
           });
           result = await this.stream({
@@ -646,6 +670,16 @@ export class Agent {
               1.6,
               Math.max(0.8, this.lastPromptTokens / this.lastRequestEstimate)
             );
+            this.onEvent({
+              type: "context_usage",
+              percent: Math.min(
+                100,
+                Math.round((this.lastPromptTokens / limit) * 100)
+              ),
+              estimated: this.lastPromptTokens,
+              limit,
+              actual: true
+            });
           }
           break;
         } catch (error) {

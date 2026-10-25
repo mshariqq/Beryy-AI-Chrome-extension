@@ -122,6 +122,20 @@ test("normalizeConversation drops orphaned tool results", () => {
   assert.equal(normalized.agent.history[2].callId, "call_1");
 });
 
+test("normalizeConversation keeps compression summaries", () => {
+  const conversation = createConversation({ id: "chat_1" });
+  conversation.agent.history = [
+    { role: "system", content: "[Conversation summary] keep this" },
+    { role: "user", content: "Continue" }
+  ];
+
+  const normalized = normalizeConversation(conversation);
+
+  assert.equal(normalized.agent.history[0].role, "system");
+  assert.match(normalized.agent.history[0].content, /keep this/);
+  assert.equal(normalized.agent.history[1].role, "user");
+});
+
 test("saves, lists, loads, and restores the active conversation", async () => {
   installStorage();
 

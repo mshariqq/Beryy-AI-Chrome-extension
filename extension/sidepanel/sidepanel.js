@@ -11,6 +11,10 @@ import {
 } from "./conversations.js";
 import { listModels } from "./provider.js";
 import {
+  contextWindowFor,
+  estimateMessagesTokens
+} from "../shared/context.js";
+import {
   getSettings,
   normalizeSettings,
   saveSettings
@@ -93,6 +97,29 @@ function updateContextIndicator(percent) {
   indicator.hidden = false;
   indicator.classList.toggle("warn", percent >= 70 && percent < 85);
   indicator.classList.toggle("danger", percent >= 85);
+}
+
+function restoreContextIndicator() {
+  const indicator = $("context-indicator");
+  if (!indicator) return;
+
+  const history = conversation?.agent?.history || [];
+  if (!history.length) {
+    indicator.hidden = true;
+    indicator.classList.remove("warn", "danger");
+    return;
+  }
+
+  const limit = contextWindowFor(settings.model);
+  const messages = [
+    { role: "system", content: "Beryy browser agent system prompt" },
+    ...history
+  ];
+  const percent = Math.min(
+    100,
+    Math.round((estimateMessagesTokens(messages) / limit) * 100)
+  );
+  updateContextIndicator(percent);
 }
 
 function updateComposer() {
@@ -621,6 +648,7 @@ function renderConversation() {
   currentAssistantEntry = null;
   toolChips.clear();
   toolEntries.clear();
+  restoreContextIndicator();
 
   const entries = conversation?.transcript || [];
   if (!entries.length) {
@@ -703,6 +731,9 @@ function handleAgentEvent(event, token) {
       setStatus("Compacting conversation context…", true);
       break;
     case "compression_done":
+      setStatus("Thinking…", true);
+      queueSave();
+      break;
     case "compression_failed":
       setStatus("Thinking…", true);
       break;
