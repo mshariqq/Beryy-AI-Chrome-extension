@@ -720,7 +720,7 @@ test("streamChat explains when Ollama cannot be reached", async () => {
         tools: [],
         forcePrompt: true
       }),
-      /OLLAMA_ORIGINS/
+      /check the base URL/
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -754,6 +754,8 @@ test("streamChat explains an Ollama origin rejection", async () => {
         forcePrompt: true
       }),
       (error) => {
+        assert.match(error.message, /Reload Beryy/);
+        assert.match(error.message, /rewritten automatically/);
         assert.match(error.message, /OLLAMA_ORIGINS/);
         assert.match(error.message, /secured proxy/);
         return true;

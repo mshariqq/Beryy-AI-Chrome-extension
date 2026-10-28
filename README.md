@@ -123,7 +123,8 @@ Ollama runs models on your own machine. Beryy uses the native `/api/chat` endpoi
 1. Install Ollama and start it (`ollama serve`).
 2. Pull a model, for example `ollama pull llama3.2`.
 3. In Beryy options choose **Ollama (local)** and set the model name. No API key is required.
-4. If Chrome reports that it cannot reach Ollama, add the extension origin to `OLLAMA_ORIGINS` (or use `*` for local development) and restart Ollama. On Windows PowerShell:
+4. Beryy automatically rewrites the browser `Origin` header for requests to `localhost` and `127.0.0.1`, so no Ollama service changes are needed for a normal local install.
+5. For a custom Ollama host or reverse proxy, allow the extension origin there (or set `OLLAMA_ORIGINS`) and restart Ollama. On Windows PowerShell:
    ```powershell
    $env:OLLAMA_ORIGINS="*"; ollama serve
    ```

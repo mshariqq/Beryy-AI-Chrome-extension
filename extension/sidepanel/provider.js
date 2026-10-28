@@ -125,7 +125,7 @@ function providerErrorMessage(status, body, settings = {}) {
       return `${message} If you are using a secured Ollama proxy, check its API key.`;
     }
     if (status === 403) {
-      return `${message} Ollama rejected this origin. For local Ollama, add this extension's origin to OLLAMA_ORIGINS (or use * for local use) and restart Ollama. If you use a secured proxy, check its API key.`;
+      return `${message} Ollama rejected this origin. Reload Beryy and retry; requests to localhost and 127.0.0.1 are rewritten automatically. For a custom host or secured proxy, allow this extension's origin in OLLAMA_ORIGINS and restart Ollama, or check the proxy API key.`;
     }
     if (status === 400 && /tool/i.test(body)) {
       return `${message} This Ollama model may not support native tools. Set Tool calling to Prompt format or choose a tool-capable model.`;
@@ -200,7 +200,7 @@ function ollamaFetchError(settings, error) {
   const message = String(error?.message || error);
   if (/failed to fetch|networkerror|load failed|fetch failed|connection refused/i.test(message)) {
     return new ProviderError(
-      `Could not reach Ollama at ${ollamaRootUrl(settings?.baseUrl)}. Start it with "ollama serve" and set OLLAMA_ORIGINS to this extension's origin (or * for local use).`
+      `Could not reach Ollama at ${ollamaRootUrl(settings?.baseUrl)}. Start it with "ollama serve" and check the base URL. If it uses a custom host, allow this extension's origin in OLLAMA_ORIGINS.`
     );
   }
   return new ProviderError(`Ollama request failed: ${message}`);

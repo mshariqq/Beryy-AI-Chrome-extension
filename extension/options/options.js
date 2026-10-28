@@ -457,7 +457,7 @@ testButton.addEventListener("click", async () => {
       current.provider === "ollama" &&
       /failed to fetch|networkerror|load failed/i.test(message)
     ) {
-      message = `Could not reach Ollama at ${ollamaRootUrl(current.baseUrl)}. Start it with "ollama serve" and set OLLAMA_ORIGINS to this extension's origin (or * for local use).`;
+      message = `Could not reach Ollama at ${ollamaRootUrl(current.baseUrl)}. Start it with "ollama serve" and check the base URL. If it uses a custom host, allow this extension's origin in OLLAMA_ORIGINS.`;
     }
     setStatus(message, "err");
   } finally {

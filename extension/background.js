@@ -12,6 +12,10 @@ import {
   TRACKER_RULESET_ID,
   buildTrackerAllowRules
 } from "./shared/tracker-rules.js";
+import {
+  buildOllamaOriginRules,
+  ollamaOriginRuleIds
+} from "./shared/ollama-cors.js";
 
 const cdp = new CDP();
 const tabs = new TabManager();
@@ -78,6 +82,13 @@ function syncTrackerRules() {
     });
   trackerSyncQueue = trackerSyncQueue.then(run, run);
   return trackerSyncQueue;
+}
+
+async function applyOllamaOriginRules() {
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: ollamaOriginRuleIds(),
+    addRules: buildOllamaOriginRules(chrome.runtime.id)
+  });
 }
 
 async function handleExecute(port, message) {
@@ -277,6 +288,9 @@ async function bootstrap() {
     // Ignore.
   }
 
+  await applyOllamaOriginRules().catch((error) => {
+    console.warn("Beryy: could not update Ollama origin rules", error);
+  });
   await tabs.recover();
   await syncTrackerRules();
   chrome.alarms.create("bery-recover", { periodInMinutes: 0.5 });

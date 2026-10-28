@@ -52,7 +52,7 @@ export const PROVIDERS = Object.freeze({
     keyPlaceholder: "Optional (only for a secured proxy)",
     modelPlaceholder: "llama3.2",
     requiresApiKey: false,
-    note: "Runs models on this computer. Start Ollama with `ollama serve`, then pull a model with `ollama pull llama3.2`. If Chrome cannot connect, set OLLAMA_ORIGINS to this extension's origin (or * for local use) before starting Ollama."
+    note: "Runs models on this computer. Start Ollama with `ollama serve`, then pull a model with `ollama pull llama3.2`. Beryy automatically fixes browser-origin checks for localhost; custom hosts or proxies may still need OLLAMA_ORIGINS."
   }),
   custom: Object.freeze({
     id: "custom",
