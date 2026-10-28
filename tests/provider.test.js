@@ -727,6 +727,43 @@ test("streamChat explains when Ollama cannot be reached", async () => {
   }
 });
 
+test("streamChat explains an Ollama origin rejection", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403,
+    text: async () => "Forbidden"
+  });
+
+  try {
+    await assert.rejects(
+      streamChat({
+        settings: {
+          provider: "ollama",
+          baseUrl: "http://localhost:11434",
+          apiKey: "",
+          model: "llama3.2",
+          temperature: 0,
+          maxTokens: 64,
+          toolMode: "prompt",
+          ollama: { apiMode: "native" }
+        },
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+        forcePrompt: true
+      }),
+      (error) => {
+        assert.match(error.message, /OLLAMA_ORIGINS/);
+        assert.match(error.message, /secured proxy/);
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamChat uses Ollama request timeout from settings", async () => {
   const originalFetch = globalThis.fetch;
 

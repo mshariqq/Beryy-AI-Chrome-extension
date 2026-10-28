@@ -121,8 +121,11 @@ function providerErrorMessage(status, body, settings = {}) {
     if (status === 404) {
       return `Ollama could not find model "${settings.model}". Install it first with: ollama pull ${settings.model}`;
     }
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       return `${message} If you are using a secured Ollama proxy, check its API key.`;
+    }
+    if (status === 403) {
+      return `${message} Ollama rejected this origin. For local Ollama, add this extension's origin to OLLAMA_ORIGINS (or use * for local use) and restart Ollama. If you use a secured proxy, check its API key.`;
     }
     if (status === 400 && /tool/i.test(body)) {
       return `${message} This Ollama model may not support native tools. Set Tool calling to Prompt format or choose a tool-capable model.`;
