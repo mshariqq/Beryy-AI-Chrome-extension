@@ -557,3 +557,26 @@ test("context-length errors compact history and retry once", async () => {
   );
   assert.match(agent.history[2].content, /trimmed to fit the model context window/);
 });
+
+test("agent context limit is capped by Ollama num_ctx", () => {
+  const agent = new Agent({
+    settings: settings({
+      provider: "ollama",
+      model: "llama3.2",
+      ollama: { numCtx: 4096 }
+    }),
+    execute: async () => ({ content: [] }),
+    onEvent: () => {}
+  });
+
+  assert.equal(agent.contextLimit(), 4096);
+
+  agent.updateSettings(
+    settings({
+      provider: "nvidia",
+      model: "llama3.2",
+      ollama: { numCtx: 4096 }
+    })
+  );
+  assert.equal(agent.contextLimit(), 128000);
+});

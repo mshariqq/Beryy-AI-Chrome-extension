@@ -8,6 +8,11 @@ import {
   estimateMessagesTokens,
   estimateTextTokens
 } from "../shared/context.js";
+import {
+  chatCompletionsUrl,
+  modelListUrl,
+  ollamaRootUrl
+} from "../shared/providers.js";
 import { buildPromptToolSpec } from "../shared/tools.js";
 
 export const REQUEST_TIMEOUT_MS = 60000;
@@ -112,6 +117,21 @@ function providerErrorMessage(status, body, settings = {}) {
   const message = errorMessage(body, fallback);
   const provider = settings.provider || "";
 
+  if (provider === "ollama") {
+    if (status === 404) {
+      return `Ollama could not find model "${settings.model}". Install it first with: ollama pull ${settings.model}`;
+    }
+    if (status === 401 || status === 403) {
+      return `${message} If you are using a secured Ollama proxy, check its API key.`;
+    }
+    if (status === 400 && /tool/i.test(body)) {
+      return `${message} This Ollama model may not support native tools. Set Tool calling to Prompt format or choose a tool-capable model.`;
+    }
+    if (status >= 500 && /load|memory|gpu|context/i.test(body)) {
+      return `${message} Reduce num_ctx or GPU layers, or check the Ollama server log.`;
+    }
+  }
+
   if (status === 402 && provider === "openrouter") {
     return "OpenRouter rejected the request for insufficient credits. Add credits or choose a free model.";
   }
@@ -155,10 +175,38 @@ function providerErrorMessage(status, body, settings = {}) {
 
 function timeoutMessage(settings, timeoutMs) {
   const seconds = Math.round(timeoutMs / 1000);
+  if (settings.provider === "ollama") {
+    return `Ollama did not start responding within ${seconds} seconds. The model may still be loading; increase Request timeout or keep the model loaded with keep_alive.`;
+  }
   if (settings.provider === "google") {
     return `Google did not start responding within ${seconds} seconds. Gemma 4 31B can be slow on the free tier; try gemma-4-26b-a4b-it or retry.`;
   }
   return `The provider did not respond within ${seconds} seconds.`;
+}
+
+function idleTimeoutMessage(settings, idleTimeoutMs) {
+  const seconds = Math.round(idleTimeoutMs / 1000);
+  if (settings.provider === "ollama") {
+    return `Ollama stopped sending data for ${seconds} seconds. The model may still be loading; increase Stream idle timeout or check the Ollama server memory.`;
+  }
+  return `The provider stopped sending data for ${seconds} seconds. If this happened after a screenshot, check that Vision is enabled only for a vision-capable model.`;
+}
+
+function ollamaFetchError(settings, error) {
+  if (error instanceof ProviderError) return error;
+  const message = String(error?.message || error);
+  if (/failed to fetch|networkerror|load failed|fetch failed|connection refused/i.test(message)) {
+    return new ProviderError(
+      `Could not reach Ollama at ${ollamaRootUrl(settings?.baseUrl)}. Start it with "ollama serve" and set OLLAMA_ORIGINS to this extension's origin (or * for local use).`
+    );
+  }
+  return new ProviderError(`Ollama request failed: ${message}`);
+}
+
+function ollamaHeaders(settings, extra = {}) {
+  const headers = { ...extra };
+  if (settings?.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+  return headers;
 }
 
 function retryDelayMs(error, attempt) {
@@ -178,9 +226,54 @@ function retryDelayMs(error, attempt) {
   return Math.min(15000, 1000 * 2 ** attempt);
 }
 
+async function listOllamaModels(settings) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(modelListUrl(settings), {
+      method: "GET",
+      headers: ollamaHeaders(settings, { Accept: "application/json" }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const raw = await response.text().catch(() => "");
+      throw new ProviderError(
+        providerErrorMessage(response.status, raw, settings),
+        { status: response.status, body: raw }
+      );
+    }
+
+    const payload = await response.json();
+    const items = Array.isArray(payload?.models)
+      ? payload.models
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+    const ids = items
+      .map((item) => (typeof item === "string" ? item : item?.name || item?.model || item?.id))
+      .filter(Boolean)
+      .map((id) => String(id));
+
+    return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new ProviderError("Loading Ollama models timed out. Is Ollama running?");
+    }
+    throw ollamaFetchError(settings, error);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function listModels(settings) {
-  if (!settings?.apiKey) {
+  if (!settings?.apiKey && settings?.provider !== "ollama") {
     throw new ProviderError("Add your API key in settings to load models.");
+  }
+
+  if (settings?.provider === "ollama" && settings.ollama?.apiMode !== "openai") {
+    return listOllamaModels(settings);
   }
 
   await acquireNvidiaRateLimit(settings);
@@ -189,12 +282,9 @@ export async function listModels(settings) {
   const timer = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(`${settings.baseUrl}/models`, {
+    const response = await fetch(modelListUrl(settings), {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${settings.apiKey}`
-      },
+      headers: ollamaHeaders(settings, { Accept: "application/json" }),
       signal: controller.signal
     });
 
@@ -413,13 +503,12 @@ async function request({
 
   let response;
   try {
-    response = await fetch(`${settings.baseUrl}/chat/completions`, {
+    response = await fetch(chatCompletionsUrl(settings), {
       method: "POST",
-      headers: {
+      headers: ollamaHeaders(settings, {
         "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        Authorization: `Bearer ${settings.apiKey}`
-      },
+        Accept: "text/event-stream"
+      }),
       body: JSON.stringify(body),
       signal: controller.signal
     });
@@ -459,7 +548,7 @@ async function request({
             controller.abort();
             reject(
               new ProviderTimeoutError(
-                `The provider stopped sending data for ${Math.round(idleTimeoutMs / 1000)} seconds. If this happened after a screenshot, check that Vision is enabled only for a vision-capable model.`
+                idleTimeoutMessage(settings, idleTimeoutMs)
               )
             );
           }, idleTimeoutMs);
@@ -549,6 +638,349 @@ async function request({
   return { content, toolCalls, finishReason, usage, mode: "native" };
 }
 
+function ollamaNumberOption(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function ollamaOptions(settings) {
+  const ollama = settings.ollama || {};
+  const maxTokens = Math.max(1, Number(settings.maxTokens) || 4096);
+  const numPredict = ollamaNumberOption(ollama.numPredict, 0);
+  const options = {
+    temperature: Number(settings.temperature ?? 0.2),
+    num_ctx: ollamaNumberOption(ollama.numCtx, 8192),
+    num_gpu: ollamaNumberOption(ollama.numGpu, -1),
+    num_predict: numPredict > 0 ? numPredict : maxTokens,
+    top_k: ollamaNumberOption(ollama.topK, 40),
+    top_p: ollamaNumberOption(ollama.topP, 0.9),
+    min_p: ollamaNumberOption(ollama.minP, 0),
+    repeat_penalty: ollamaNumberOption(ollama.repeatPenalty, 1.1),
+    repeat_last_n: ollamaNumberOption(ollama.repeatLastN, 64),
+    presence_penalty: ollamaNumberOption(ollama.presencePenalty, 0),
+    frequency_penalty: ollamaNumberOption(ollama.frequencyPenalty, 0),
+    use_mmap: ollama.useMmap !== false,
+    use_mlock: ollama.useMlock === true
+  };
+
+  const numThread = ollamaNumberOption(ollama.numThread, 0);
+  if (numThread > 0) options.num_thread = numThread;
+  const numBatch = ollamaNumberOption(ollama.numBatch, 0);
+  if (numBatch > 0) options.num_batch = numBatch;
+  const numKeep = ollamaNumberOption(ollama.numKeep, 0);
+  if (numKeep > 0) options.num_keep = numKeep;
+
+  const seed = ollamaNumberOption(ollama.seed, -1);
+  if (seed >= 0) options.seed = seed;
+  if (ollama.flashAttn === "on") options.flash_attn = true;
+  if (ollama.flashAttn === "off") options.flash_attn = false;
+  if (ollama.kvCacheType) options.kv_cache_type = ollama.kvCacheType;
+
+  const stop = String(ollama.stop || "")
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (stop.length) options.stop = stop;
+
+  return options;
+}
+
+function ollamaThinkValue(value) {
+  if (value === "on") return true;
+  if (value === "off") return false;
+  if (["low", "medium", "high"].includes(value)) return value;
+  return undefined;
+}
+
+function ollamaArguments(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value ?? "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function ollamaMessages(messages) {
+  const callNames = new Map();
+  for (const message of messages) {
+    for (const call of message?.tool_calls || []) {
+      if (call?.id && call?.function?.name) callNames.set(call.id, call.function.name);
+    }
+  }
+
+  return messages
+    .map((message) => {
+      const role = message.role;
+
+      if (Array.isArray(message.content)) {
+        const texts = [];
+        const images = [];
+        for (const part of message.content) {
+          if (part?.type === "text") texts.push(String(part.text ?? ""));
+          if (part?.type === "image_url") {
+            const url =
+              typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
+            const match = /^data:[^;]+;base64,(.+)$/i.exec(String(url || ""));
+            if (match) images.push(match[1]);
+          }
+        }
+        const output = { role, content: texts.join("\n") };
+        if (images.length) output.images = images;
+        return output;
+      }
+
+      if (role === "assistant" && Array.isArray(message.tool_calls)) {
+        const toolCalls = message.tool_calls
+          .map((call) => {
+            const name = call.function?.name || call.name;
+            if (!name) return null;
+            return {
+              function: {
+                name: String(name),
+                arguments: ollamaArguments(call.function?.arguments ?? call.arguments)
+              }
+            };
+          })
+          .filter(Boolean);
+        return {
+          role: "assistant",
+          content: String(message.content ?? ""),
+          ...(toolCalls.length ? { tool_calls: toolCalls } : {})
+        };
+      }
+
+      if (role === "tool") {
+        const output = { role: "tool", content: String(message.content ?? "") };
+        const name = message.name || callNames.get(message.tool_call_id);
+        if (name) output.tool_name = String(name);
+        return output;
+      }
+
+      return { role, content: String(message.content ?? "") };
+    })
+    .filter((message) => message.content || message.images || message.tool_calls);
+}
+
+async function streamOllamaChat({
+  settings,
+  messages,
+  tools,
+  signal,
+  onDelta,
+  onReasoning,
+  timeoutMs,
+  idleTimeoutMs,
+  forcePrompt = false
+}) {
+  const native = !forcePrompt && settings.toolMode !== "prompt";
+  const prepared = native
+    ? messages
+    : withPromptInstructions(promptSafeMessages(messages), settings.toolMode !== "prompt");
+  const body = {
+    model: settings.model,
+    messages: ollamaMessages(prepared),
+    stream: true,
+    keep_alive: settings.ollama?.keepAlive || "5m",
+    options: ollamaOptions(settings)
+  };
+  if (native && Array.isArray(tools) && tools.length) body.tools = tools;
+
+  const think = ollamaThinkValue(settings.ollama?.think);
+  if (think !== undefined) body.think = think;
+
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) abortFromCaller();
+    else signal.addEventListener("abort", abortFromCaller, { once: true });
+  }
+
+  let headerTimedOut = false;
+  const headerTimer = setTimeout(() => {
+    headerTimedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(chatCompletionsUrl(settings), {
+      method: "POST",
+      headers: ollamaHeaders(settings, {
+        "Content-Type": "application/json",
+        Accept: "application/x-ndjson"
+      }),
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    signal?.removeEventListener("abort", abortFromCaller);
+    if (headerTimedOut) {
+      throw new ProviderTimeoutError(timeoutMessage(settings, timeoutMs));
+    }
+    if (error?.name === "AbortError") throw error;
+    throw ollamaFetchError(settings, error);
+  } finally {
+    clearTimeout(headerTimer);
+  }
+
+  if (!response.ok) {
+    signal?.removeEventListener("abort", abortFromCaller);
+    const raw = await response.text().catch(() => "");
+    if (
+      native &&
+      settings.toolMode === "auto" &&
+      [400, 422].includes(response.status) &&
+      /tool/i.test(raw)
+    ) {
+      return streamOllamaChat({
+        settings,
+        messages,
+        tools,
+        signal,
+        onDelta,
+        onReasoning,
+        timeoutMs,
+        idleTimeoutMs,
+        forcePrompt: true
+      });
+    }
+    throw new ProviderError(providerErrorMessage(response.status, raw, settings), {
+      status: response.status,
+      body: raw
+    });
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    signal?.removeEventListener("abort", abortFromCaller);
+    throw new ProviderError("Ollama returned an empty response body.");
+  }
+
+  const readNext = async () => {
+    let idleTimer;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => {
+          idleTimer = setTimeout(() => {
+            controller.abort();
+            reject(
+              new ProviderTimeoutError(idleTimeoutMessage(settings, idleTimeoutMs))
+            );
+          }, idleTimeoutMs);
+        })
+      ]);
+    } finally {
+      clearTimeout(idleTimer);
+    }
+  };
+
+  const decoder = new TextDecoder();
+  const toolMap = new Map();
+  let buffer = "";
+  let content = "";
+  let finishReason = null;
+  let usage = null;
+
+  const consumeLine = (line) => {
+    const text = line.trim();
+    if (!text) return;
+
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return;
+    }
+
+    if (json.error) {
+      throw new ProviderError(String(json.error?.message || json.error), {
+        status: 500,
+        body: text
+      });
+    }
+
+    const message = json.message;
+    if (message) {
+      if (typeof message.content === "string" && message.content) {
+        content += message.content;
+        if (native) onDelta?.(message.content);
+      }
+
+      const reasoning = message.thinking || message.reasoning;
+      if (typeof reasoning === "string" && reasoning) onReasoning?.(reasoning);
+
+      if (Array.isArray(message.tool_calls)) {
+        for (let index = 0; index < message.tool_calls.length; index += 1) {
+          const call = message.tool_calls[index];
+          const fn = call?.function || call;
+          const name = fn?.name || call?.name;
+          if (!name) continue;
+          toolMap.set(index, {
+            id: String(call?.id || `call_ollama_${Date.now()}_${index}`),
+            name: String(name),
+            arguments: JSON.stringify(ollamaArguments(fn?.arguments ?? call?.arguments))
+          });
+        }
+      }
+    }
+
+    if (json.done) {
+      finishReason = json.done_reason || finishReason || "stop";
+      const promptTokens = Number(json.prompt_eval_count);
+      const completionTokens = Number(json.eval_count);
+      if (Number.isFinite(promptTokens) || Number.isFinite(completionTokens)) {
+        const prompt = Number.isFinite(promptTokens) ? promptTokens : 0;
+        const completion = Number.isFinite(completionTokens) ? completionTokens : 0;
+        usage = {
+          prompt_tokens: prompt,
+          completion_tokens: completion,
+          total_tokens: prompt + completion
+        };
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await readNext();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) consumeLine(line);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeLine(buffer);
+  } finally {
+    try {
+      reader.releaseLock?.();
+    } catch {}
+    signal?.removeEventListener("abort", abortFromCaller);
+  }
+
+  const toolCalls = [...toolMap.values()];
+  const result = {
+    content,
+    toolCalls,
+    finishReason,
+    usage,
+    mode: native ? "native" : "prompt"
+  };
+
+  if (!native) {
+    const parsed = extractToolCalls(content);
+    result.rawContent = content;
+    result.content = parsed.text;
+    result.toolCalls = parsed.toolCalls;
+    if (parsed.text) onDelta?.(parsed.text);
+  }
+
+  return result;
+}
+
 export async function streamChat({
   settings,
   messages,
@@ -562,21 +994,48 @@ export async function streamChat({
   timeoutMs = REQUEST_TIMEOUT_MS,
   idleTimeoutMs = STREAM_IDLE_MS
 }) {
-  if (!settings.apiKey) {
+  if (!settings.apiKey && settings.provider !== "ollama") {
     throw new ProviderError(
       "No API key is configured. Open Beryy settings and add your API key."
     );
   }
 
   const google = settings.provider === "google";
-  const effectiveTimeoutMs =
+  const ollama = settings.provider === "ollama";
+  let effectiveTimeoutMs =
     google && timeoutMs === REQUEST_TIMEOUT_MS
       ? GOOGLE_REQUEST_TIMEOUT_MS
       : timeoutMs;
-  const effectiveIdleTimeoutMs =
+  let effectiveIdleTimeoutMs =
     google && idleTimeoutMs === STREAM_IDLE_MS
       ? GOOGLE_STREAM_IDLE_MS
       : idleTimeoutMs;
+
+  if (ollama) {
+    const requestTimeout = Number(settings.ollama?.requestTimeoutMs);
+    const idleTimeout = Number(settings.ollama?.idleTimeoutMs);
+    if (timeoutMs === REQUEST_TIMEOUT_MS && requestTimeout > 0) {
+      effectiveTimeoutMs = requestTimeout;
+    }
+    if (idleTimeoutMs === STREAM_IDLE_MS && idleTimeout > 0) {
+      effectiveIdleTimeoutMs = idleTimeout;
+    }
+  }
+
+  if (ollama && settings.ollama?.apiMode !== "openai") {
+    return streamOllamaChat({
+      settings,
+      messages,
+      tools,
+      signal,
+      onDelta,
+      onReasoning,
+      forcePrompt,
+      timeoutMs: effectiveTimeoutMs,
+      idleTimeoutMs: effectiveIdleTimeoutMs
+    });
+  }
+
   const native = !forcePrompt && settings.toolMode !== "prompt";
 
   let result;

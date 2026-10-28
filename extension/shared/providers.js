@@ -7,6 +7,7 @@ export const PROVIDERS = Object.freeze({
     model: "meta/llama-3.3-70b-instruct",
     keyPlaceholder: "nvapi-…",
     modelPlaceholder: "meta/llama-3.3-70b-instruct",
+    requiresApiKey: true,
     note: "NVIDIA's OpenAI-compatible endpoint. Models must be enabled for your NVIDIA account."
   }),
   google: Object.freeze({
@@ -17,6 +18,7 @@ export const PROVIDERS = Object.freeze({
     model: "gemma-4-26b-a4b-it",
     keyPlaceholder: "AIza…",
     modelPlaceholder: "gemma-4-26b-a4b-it",
+    requiresApiKey: true,
     note: "Google's OpenAI-compatible Gemini endpoint. Gemma 4 26B A4B is faster and more stable on the free tier; Gemma 4 31B is also available. Free-tier content may be used to improve Google products."
   }),
   groq: Object.freeze({
@@ -27,6 +29,7 @@ export const PROVIDERS = Object.freeze({
     model: "openai/gpt-oss-120b",
     keyPlaceholder: "gsk_...",
     modelPlaceholder: "openai/gpt-oss-120b",
+    requiresApiKey: true,
     note: "Groq's OpenAI-compatible endpoint. The GPT-OSS 120B free tier is about 30 requests/min, 8K tokens/min, and 1,000 requests/day per organization. Beryy retries 429s automatically."
   }),
   openrouter: Object.freeze({
@@ -37,7 +40,19 @@ export const PROVIDERS = Object.freeze({
     model: "openrouter/free",
     keyPlaceholder: "sk-or-v1-...",
     modelPlaceholder: "openrouter/free",
+    requiresApiKey: true,
     note: "OpenRouter routes across many models. openrouter/free selects a free model that supports tool calling. Free tier: 20 requests/min and 50/day, or 1,000/day after $10 in credits. Enable free-model publication in OpenRouter privacy settings if prompted."
+  }),
+  ollama: Object.freeze({
+    id: "ollama",
+    label: "Ollama (local)",
+    shortLabel: "Ollama",
+    baseUrl: "http://localhost:11434",
+    model: "llama3.2",
+    keyPlaceholder: "Optional (only for a secured proxy)",
+    modelPlaceholder: "llama3.2",
+    requiresApiKey: false,
+    note: "Runs models on this computer. Start Ollama with `ollama serve`, then pull a model with `ollama pull llama3.2`. If Chrome cannot connect, set OLLAMA_ORIGINS to this extension's origin (or * for local use) before starting Ollama."
   }),
   custom: Object.freeze({
     id: "custom",
@@ -47,6 +62,7 @@ export const PROVIDERS = Object.freeze({
     model: "",
     keyPlaceholder: "API key",
     modelPlaceholder: "model-id",
+    requiresApiKey: true,
     note: "Any OpenAI-compatible endpoint with a /chat/completions route."
   })
 });
@@ -63,6 +79,41 @@ export function providerPreset(provider) {
 
 export function providerLabel(provider) {
   return providerPreset(provider).label;
+}
+
+export function providerRequiresApiKey(provider) {
+  return providerPreset(provider).requiresApiKey !== false;
+}
+
+export function ollamaRootUrl(baseUrl = PROVIDERS.ollama.baseUrl) {
+  return String(baseUrl || PROVIDERS.ollama.baseUrl)
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/v1$/i, "");
+}
+
+export function ollamaOpenAIBaseUrl(baseUrl = PROVIDERS.ollama.baseUrl) {
+  return `${ollamaRootUrl(baseUrl)}/v1`;
+}
+
+export function chatCompletionsUrl(settings = {}) {
+  if (settings.provider === "ollama") {
+    if (settings.ollama?.apiMode === "openai") {
+      return `${ollamaOpenAIBaseUrl(settings.baseUrl)}/chat/completions`;
+    }
+    return `${ollamaRootUrl(settings.baseUrl)}/api/chat`;
+  }
+  return `${String(settings.baseUrl || "").replace(/\/+$/, "")}/chat/completions`;
+}
+
+export function modelListUrl(settings = {}) {
+  if (settings.provider === "ollama") {
+    if (settings.ollama?.apiMode === "openai") {
+      return `${ollamaOpenAIBaseUrl(settings.baseUrl)}/models`;
+    }
+    return `${ollamaRootUrl(settings.baseUrl)}/api/tags`;
+  }
+  return `${String(settings.baseUrl || "").replace(/\/+$/, "")}/models`;
 }
 
 export function providerDefaults(provider) {

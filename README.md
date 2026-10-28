@@ -18,7 +18,8 @@ Beryy lives in your browser's side panel. You give it a goal — *"Find the pric
 
 | Feature | Details |
 |---------|---------|
-| **Multi-provider LLM support** | NVIDIA NIM, Google AI Studio, Groq, OpenRouter, or any OpenAI-compatible endpoint |
+| **Multi-provider LLM support** | NVIDIA NIM, Google AI Studio, Groq, OpenRouter, local Ollama, or any OpenAI-compatible endpoint |
+| **Local models** | Ollama native `/api/chat` streaming with context, GPU, memory, sampling, and timeout controls |
 | **Native tool use** | 16 tools for navigation, page reading, clicking and typing, tabs, console/network inspection, screenshots, and plan updates |
 | **Cross-origin iframes** | Frame-aware refs, clicks, typing, text extraction, and nested OOPIF support |
 | **File uploads** | Attach local files to page or iframe file inputs with explicit upload permission |
@@ -46,8 +47,9 @@ Beryy lives in your browser's side panel. You give it a goal — *"Find the pric
 
 2. **Configure**  
    - Click the Beryy toolbar icon → **Options**  
-   - Choose provider: **NVIDIA NIM**, **Google AI Studio**, **Groq**, **OpenRouter**, or **Custom**
+   - Choose provider: **NVIDIA NIM**, **Google AI Studio**, **Groq**, **OpenRouter**, **Ollama (local)**, or **Custom**
    - Paste your API key, pick a model, save
+   - For Ollama, start it first (`ollama serve`) and pull a model (`ollama pull llama3.2`); no API key is needed
 
 3. **Run**  
    - Open the side panel (toolbar icon)  
@@ -76,14 +78,14 @@ extension/
 │   ├── index.html         # Side panel UI
 │   ├── sidepanel.js       # UI controller, agent bridge
 │   ├── agent.js           # Agent loop, tool execution, context mgmt
-│   ├── provider.js        # LLM streaming, retries, rate limits
+│   ├── provider.js        # LLM streaming, retries, rate limits, Ollama NDJSON
 ├── options/
 │   ├── options.html       # Settings page
-│   ├── options.js         # Provider/key/model management
+│   ├── options.js         # Provider/key/model and Ollama management
 │   └── options.css
 ├── shared/
 │   ├── settings.js        # Settings schema, migration, validation
-│   ├── providers.js       # Provider presets (NVIDIA, Google, Groq, OpenRouter, Custom)
+│   ├── providers.js       # Provider presets (NVIDIA, Google, Groq, OpenRouter, Ollama, Custom)
 │   ├── vision.js          # Vision capability detection
 │   ├── context.js         # Context estimation, compaction logic
 │   ├── rate-limit.js      # NVIDIA and Google request/token limiters
@@ -111,7 +113,22 @@ User input → `Agent.run()` → `buildMessages()` → `streamChat()` (retries, 
 | **Google AI Studio** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemma-4-26b-a4b-it` | Free tier; configurable TPM/RPD/RPM |
 | **Groq** | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` | Fast OpenAI-compatible inference; free tier |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `openrouter/free` | One key for many models; free router |
+| **Ollama** | `http://localhost:11434` | `llama3.2` | Local, keyless, native `/api/chat` streaming plus advanced options |
 | **Custom** | Your OpenAI-compatible endpoint | — | Any `/v1/chat/completions` endpoint |
+
+### Ollama
+
+Ollama runs models on your own machine. Beryy uses the native `/api/chat` endpoint by default so it can pass context size, GPU layers, threads, sampling, memory, and keep-alive settings. The OpenAI-compatible `/v1` mode is available for basic compatibility but ignores the Ollama-only options.
+
+1. Install Ollama and start it (`ollama serve`).
+2. Pull a model, for example `ollama pull llama3.2`.
+3. In Beryy options choose **Ollama (local)** and set the model name. No API key is required.
+4. If Chrome reports that it cannot reach Ollama, add the extension origin to `OLLAMA_ORIGINS` (or use `*` for local development) and restart Ollama. On Windows PowerShell:
+   ```powershell
+   $env:OLLAMA_ORIGINS="*"; ollama serve
+   ```
+
+The **Speed preset** fills the advanced fields; you can then adjust anything. Lower `num_ctx`, GPU layers, batch size, and thread count reduce memory use. Increase **Request timeout** if a large model needs time to load, and use `keep_alive` to keep it resident between replies.
 
 ### Free-tier notes
 
@@ -130,8 +147,9 @@ Limits change; these were checked against provider documentation in October 2026
 
 | Setting | Description |
 |---------|-------------|
-| `provider` | Active provider: `nvidia`, `google`, `groq`, `openrouter`, `custom` |
+| `provider` | Active provider: `nvidia`, `google`, `groq`, `openrouter`, `ollama`, `custom` |
 | `providerAccounts` | Per-provider `{baseUrl, apiKey, model}` |
+| `ollama` | Ollama options: `apiMode`, `keepAlive`, `numCtx`, `numPredict`, `numGpu`, `numThread`, `numBatch`, `numKeep`, `topK`, `topP`, `minP`, `repeatPenalty`, `repeatLastN`, `presencePenalty`, `frequencyPenalty`, `seed`, `stop`, `think`, `flashAttn`, `kvCacheType`, `useMmap`, `useMlock`, `requestTimeoutMs`, `idleTimeoutMs` |
 | `nvidiaRateLimit` | Enforce 40 RPM for NVIDIA (default: on) |
 | `googleTpm` | Google tokens per minute guard (default: 150000) |
 | `googleRpd` | Google requests per day guard (default: 50) |

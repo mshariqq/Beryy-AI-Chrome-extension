@@ -1,7 +1,7 @@
 import { buildSystemPrompt } from "../shared/prompt.js";
 import {
   COMPACTION_THRESHOLD,
-  contextWindowFor,
+  contextWindowForSettings,
   estimateMessageTokens,
   estimateMessagesTokens
 } from "../shared/context.js";
@@ -211,7 +211,7 @@ export class Agent {
       if (item?.role === "tool") {
         tools += 1;
         if (tools > 2) {
-          const content = clipText(item.content, 6000);
+          const content = clipText(item.content, 3000);
           if (content !== item.content) {
             item.content = content;
             changed += 1;
@@ -220,7 +220,7 @@ export class Agent {
       } else if (item?.role === "assistant") {
         assistants += 1;
         if (assistants > 3) {
-          const content = clipText(item.content, 6000);
+          const content = clipText(item.content, 4000);
           if (content !== item.content) {
             item.content = content;
             changed += 1;
@@ -229,7 +229,7 @@ export class Agent {
       } else if (item?.role === "user" && typeof item.content === "string") {
         users += 1;
         if (users > 4) {
-          const content = clipText(item.content, 8000);
+          const content = clipText(item.content, 6000);
           if (content !== item.content) {
             item.content = content;
             changed += 1;
@@ -242,7 +242,7 @@ export class Agent {
   }
 
   contextLimit() {
-    return this.contextWindow || contextWindowFor(this.settings.model);
+    return this.contextWindow || contextWindowForSettings(this.settings);
   }
 
   formatHistoryForSummary(history, maxChars) {
@@ -366,7 +366,8 @@ export class Agent {
       return true;
     } catch (error) {
       if (error?.name === "AbortError" || signal?.aborted) throw error;
-      this.onEvent({ type: "compression_failed", reason });
+      console.error("[Beryy] Context compression failed:", error?.message || error);
+      this.onEvent({ type: "compression_failed", reason, error: error?.message || String(error) });
       return false;
     }
   }
@@ -392,7 +393,7 @@ export class Agent {
       this.lastPromptTokens = 0;
       this.onEvent({
         type: "notice",
-        text: "Context reached 85%; older output was shortened because compression was unavailable."
+        text: "Context reached 85%; older output was shortened (LLM summarization unavailable, using local truncation)."
       });
     }
     return changed > 0;
@@ -709,7 +710,7 @@ export class Agent {
                 this.lastPromptTokens = 0;
                 this.onEvent({
                   type: "notice",
-                  text: "This chat exceeded the model's context window. Older output was shortened, and the request is being retried."
+                  text: "This chat exceeded the model's context window. Older output was shortened (LLM summarization unavailable, using local truncation), and the request is being retried."
                 });
                 continue;
               }

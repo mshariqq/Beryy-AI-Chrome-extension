@@ -5,6 +5,7 @@ import {
   COMPACTION_THRESHOLD,
   contextUsage,
   contextWindowFor,
+  contextWindowForSettings,
   estimateMessageTokens,
   estimateMessagesTokens,
   shouldCompact
@@ -17,6 +18,41 @@ test("context windows are recognized for supported model families", () => {
   assert.equal(contextWindowFor("meta/llama-3.3-70b-instruct"), 128000);
   assert.equal(contextWindowFor("gemini-2.5-pro"), 1048576);
   assert.equal(contextWindowFor("unknown-model"), 128000);
+});
+
+test("Ollama context window is capped by num_ctx", () => {
+  assert.equal(
+    contextWindowForSettings({
+      provider: "ollama",
+      model: "llama3.2",
+      ollama: { numCtx: 4096 }
+    }),
+    4096
+  );
+  assert.equal(
+    contextWindowForSettings({
+      provider: "ollama",
+      model: "llama3.2",
+      ollama: { numCtx: 262144 }
+    }),
+    128000
+  );
+  assert.equal(
+    contextWindowForSettings({
+      provider: "ollama",
+      model: "llama3.2",
+      ollama: { numCtx: 0 }
+    }),
+    128000
+  );
+  assert.equal(
+    contextWindowForSettings({
+      provider: "nvidia",
+      model: "llama3.2",
+      ollama: { numCtx: 4096 }
+    }),
+    128000
+  );
 });
 
 test("message estimates include text, tool calls, and screenshots", () => {

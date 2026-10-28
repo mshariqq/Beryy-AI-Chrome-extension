@@ -14,7 +14,7 @@
           <img class="logo" src="../icons/berry-logo.png" alt="" aria-hidden="true" />
           <div>
             <h1>Beryy settings</h1>
-            <p>Connect NVIDIA NIM, Google AI Studio, Groq, or OpenRouter. Everything stays in this Chrome profile.</p>
+            <p>Connect NVIDIA NIM, Google AI Studio, Groq, OpenRouter, local Ollama, or an OpenAI-compatible endpoint. Everything stays in this Chrome profile.</p>
           </div>
         </div>
       </header>
@@ -25,8 +25,9 @@
           <p class="section-note">
             Keys and model choices are saved separately for each provider. Switch providers
             here or from the side panel. Any compatible
-            <code>/chat/completions</code> endpoint also works. Rate limits and temporary
-            provider outages are retried automatically with backoff.
+            <code>/chat/completions</code> endpoint also works. Local Ollama models need no
+            API key. Rate limits and temporary provider outages are retried automatically
+            with backoff.
           </p>
 
           <label class="field">
@@ -36,18 +37,19 @@
               <option value="google">Google AI Studio</option>
               <option value="groq">Groq</option>
               <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (local)</option>
               <option value="custom">Custom endpoint</option>
             </select>
             <small id="provider-note"></small>
           </label>
 
           <label class="field">
-            <span>API key</span>
+            <span id="api-key-label">API key</span>
             <div class="inline">
               <input id="apiKey" name="apiKey" type="password" placeholder="nvapi-…" autocomplete="off" spellcheck="false" />
               <button id="toggle-key" type="button" class="secondary">Show</button>
             </div>
-            <small>Stored in <code>chrome.storage.local</code> for this profile. It is sent only to the selected provider's base URL.</small>
+            <small id="api-key-hint">Stored in <code>chrome.storage.local</code> for this profile. It is sent only to the selected provider's base URL.</small>
           </label>
 
           <label class="field">
@@ -120,6 +122,182 @@
               Google project quota.
             </small>
           </div>
+        </section>
+
+        <section id="ollama-settings" hidden>
+          <h2>Ollama local settings</h2>
+          <p class="section-note">
+            Native mode uses <code>/api/chat</code> and applies every option below. The
+            OpenAI-compatible mode uses <code>/v1</code> and only applies the shared
+            temperature and output-token settings. Lower <code>num_ctx</code>, GPU layers,
+            batch size, and threads to reduce memory; keep the model loaded with
+            <code>keep_alive</code> to avoid reload delays.
+          </p>
+
+          <div class="grid two">
+            <label class="field">
+              <span>API mode</span>
+              <select id="ollamaApiMode" name="ollamaApiMode">
+                <option value="native">Native /api/chat (all options)</option>
+                <option value="openai">OpenAI-compatible /v1 (basic options)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Keep model loaded</span>
+              <input id="ollamaKeepAlive" name="ollamaKeepAlive" type="text" placeholder="5m" spellcheck="false" />
+              <small>Examples: <code>5m</code>, <code>1h</code>, <code>-1</code> forever, <code>0</code> unload after the request.</small>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Speed preset</span>
+            <select id="ollamaPreset">
+              <option value="">Custom (keep current values)</option>
+              <option value="fast">Fast / small context</option>
+              <option value="balanced">Balanced GPU</option>
+              <option value="quality">Quality / larger context</option>
+              <option value="cpu">CPU only / low memory</option>
+            </select>
+            <small>Presets fill the fields below. Adjust anything afterward; presets are not saved separately.</small>
+          </label>
+
+          <div class="grid three">
+            <label class="field">
+              <span>Context window (num_ctx)</span>
+              <input id="ollamaNumCtx" name="ollamaNumCtx" type="number" min="512" max="1048576" step="512" />
+            </label>
+            <label class="field">
+              <span>GPU layers (num_gpu)</span>
+              <input id="ollamaNumGpu" name="ollamaNumGpu" type="number" min="-1" max="1000" step="1" />
+              <small><code>-1</code> auto, <code>0</code> CPU only.</small>
+            </label>
+            <label class="field">
+              <span>CPU threads (num_thread)</span>
+              <input id="ollamaNumThread" name="ollamaNumThread" type="number" min="0" max="512" step="1" />
+              <small><code>0</code> lets Ollama choose.</small>
+            </label>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>Batch size (num_batch)</span>
+              <input id="ollamaNumBatch" name="ollamaNumBatch" type="number" min="0" max="8192" step="1" />
+            </label>
+            <label class="field">
+              <span>Keep prompt tokens (num_keep)</span>
+              <input id="ollamaNumKeep" name="ollamaNumKeep" type="number" min="0" max="65536" step="1" />
+            </label>
+            <label class="field">
+              <span>Max output override (num_predict)</span>
+              <input id="ollamaNumPredict" name="ollamaNumPredict" type="number" min="0" max="65536" step="1" />
+              <small><code>0</code> uses Max output tokens above.</small>
+            </label>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>Top K</span>
+              <input id="ollamaTopK" name="ollamaTopK" type="number" min="0" max="1000" step="1" />
+            </label>
+            <label class="field">
+              <span>Top P</span>
+              <input id="ollamaTopP" name="ollamaTopP" type="number" min="0" max="1" step="0.01" />
+            </label>
+            <label class="field">
+              <span>Min P</span>
+              <input id="ollamaMinP" name="ollamaMinP" type="number" min="0" max="1" step="0.01" />
+            </label>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>Repeat penalty</span>
+              <input id="ollamaRepeatPenalty" name="ollamaRepeatPenalty" type="number" min="0" max="5" step="0.01" />
+            </label>
+            <label class="field">
+              <span>Repeat last N</span>
+              <input id="ollamaRepeatLastN" name="ollamaRepeatLastN" type="number" min="0" max="100000" step="1" />
+            </label>
+            <label class="field">
+              <span>Seed</span>
+              <input id="ollamaSeed" name="ollamaSeed" type="number" min="-1" max="2147483647" step="1" />
+              <small><code>-1</code> random.</small>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label class="field">
+              <span>Presence penalty</span>
+              <input id="ollamaPresencePenalty" name="ollamaPresencePenalty" type="number" min="-2" max="2" step="0.01" />
+            </label>
+            <label class="field">
+              <span>Frequency penalty</span>
+              <input id="ollamaFrequencyPenalty" name="ollamaFrequencyPenalty" type="number" min="-2" max="2" step="0.01" />
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label class="field">
+              <span>Flash attention</span>
+              <select id="ollamaFlashAttn" name="ollamaFlashAttn">
+                <option value="auto">Auto (model default)</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>KV cache type</span>
+              <select id="ollamaKvCacheType" name="ollamaKvCacheType">
+                <option value="">Model default</option>
+                <option value="f16">f16</option>
+                <option value="q8_0">q8_0</option>
+                <option value="q4_0">q4_0</option>
+                <option value="q4_1">q4_1</option>
+                <option value="q5_0">q5_0</option>
+                <option value="q5_1">q5_1</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label class="field">
+              <span>Thinking mode</span>
+              <select id="ollamaThink" name="ollamaThink">
+                <option value="auto">Auto (model default)</option>
+                <option value="off">Off</option>
+                <option value="on">On</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Stop sequences</span>
+              <textarea id="ollamaStop" name="ollamaStop" rows="3" placeholder="One sequence per line"></textarea>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label class="field">
+              <span>Request timeout (ms)</span>
+              <input id="ollamaRequestTimeoutMs" name="ollamaRequestTimeoutMs" type="number" min="5000" max="1800000" step="1000" />
+              <small>Time allowed for Ollama to start responding, including model load.</small>
+            </label>
+            <label class="field">
+              <span>Stream idle timeout (ms)</span>
+              <input id="ollamaIdleTimeoutMs" name="ollamaIdleTimeoutMs" type="number" min="5000" max="1800000" step="1000" />
+              <small>Time allowed between streamed tokens before Beryy stops.</small>
+            </label>
+          </div>
+
+          <label class="check">
+            <input id="ollamaUseMmap" name="ollamaUseMmap" type="checkbox" />
+            <span>Map model files into memory (use_mmap)</span>
+          </label>
+          <label class="check">
+            <input id="ollamaUseMlock" name="ollamaUseMlock" type="checkbox" />
+            <span>Lock model in RAM (use_mlock; usually requires elevated privileges)</span>
+          </label>
         </section>
 
         <section>

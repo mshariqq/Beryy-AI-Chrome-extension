@@ -11,7 +11,7 @@ import {
 } from "./conversations.js";
 import { listModels } from "./provider.js";
 import {
-  contextWindowFor,
+  contextWindowForSettings,
   estimateMessagesTokens
 } from "../shared/context.js";
 import {
@@ -19,7 +19,11 @@ import {
   normalizeSettings,
   saveSettings
 } from "../shared/settings.js";
-import { PROVIDERS, providerLabel } from "../shared/providers.js";
+import {
+  PROVIDERS,
+  providerLabel,
+  providerRequiresApiKey
+} from "../shared/providers.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -118,7 +122,7 @@ function restoreContextIndicator() {
     return;
   }
 
-  const limit = contextWindowFor(settings.model);
+  const limit = contextWindowForSettings(settings);
   const messages = [
     { role: "system", content: "Beryy browser agent system prompt" },
     ...history
@@ -292,7 +296,11 @@ function onPortMessage(message) {
 }
 
 function modelSourceKey(value = settings) {
-  return `${value.provider}|${value.baseUrl}|${value.apiKey}`;
+  return `${value.provider}|${value.baseUrl}|${value.apiKey}|${value.ollama?.apiMode || ""}`;
+}
+
+function providerReady(value = settings) {
+  return !providerRequiresApiKey(value.provider) || Boolean(value.apiKey);
 }
 
 function renderProviderOptions() {
@@ -308,8 +316,12 @@ function renderProviderOptions() {
   providerSelect.value = settings.provider;
 }
 
+function activeModelList() {
+  return modelListKey === modelSourceKey() ? modelList : [];
+}
+
 function renderModelOptions(selected) {
-  const values = [...new Set([selected, ...modelList].filter(Boolean))].sort((a, b) =>
+  const values = [...new Set([selected, ...activeModelList()].filter(Boolean))].sort((a, b) =>
     a.localeCompare(b)
   );
 
@@ -330,14 +342,14 @@ function renderModelOptions(selected) {
     modelSelect.value = selected || values[0];
   }
 
-  modelSelect.disabled = !settings.apiKey || values.length === 0;
-  refreshModelsButton.disabled = !settings.apiKey;
+  modelSelect.disabled = !providerReady() || values.length === 0;
+  refreshModelsButton.disabled = !providerReady();
 }
 
 async function loadModels({ force = false, announce = false } = {}) {
   const providerName = providerLabel(settings.provider);
 
-  if (!settings.apiKey) {
+  if (!providerReady()) {
     modelList = [];
     modelListKey = "";
     renderModelOptions(settings.model);
@@ -359,6 +371,7 @@ async function loadModels({ force = false, announce = false } = {}) {
   const token = ++modelRequest;
   renderModelOptions(settings.model);
   modelSelect.disabled = true;
+  modelSelect.title = `Loading ${providerName} models`;
   refreshModelsButton.disabled = true;
   refreshModelsButton.classList.add("loading");
   if (announce) setStatus("Loading models…", true);
@@ -370,7 +383,7 @@ async function loadModels({ force = false, announce = false } = {}) {
     modelList = models;
     modelListKey = key;
     renderModelOptions(settings.model);
-    modelSelect.title = `${models.length} model${models.length === 1 ? "" : "s"} available`;
+    modelSelect.title = `${models.length} ${providerName} model${models.length === 1 ? "" : "s"} available`;
 
     if (announce) {
       setStatus(`Loaded ${models.length} model${models.length === 1 ? "" : "s"}.`);
@@ -382,7 +395,7 @@ async function loadModels({ force = false, announce = false } = {}) {
     if (token !== modelRequest) return;
     renderModelOptions(settings.model);
     const message = String(error?.message || error);
-    modelSelect.title = `Could not load models: ${message}`;
+    modelSelect.title = `Could not load ${providerName} models: ${message}`;
     if (announce) {
       setStatus("", false);
       addNotice(`Could not load ${providerName} models: ${message}`, "error");
@@ -390,8 +403,8 @@ async function loadModels({ force = false, announce = false } = {}) {
   } finally {
     if (token === modelRequest) {
       refreshModelsButton.classList.remove("loading");
-      refreshModelsButton.disabled = !settings.apiKey;
-      modelSelect.disabled = !settings.apiKey;
+      refreshModelsButton.disabled = !providerReady();
+      modelSelect.disabled = !providerReady();
     }
   }
 }
@@ -404,7 +417,7 @@ function applySettings() {
   modeSelect.value = settings.permissionMode;
   renderModelOptions(settings.model);
 
-  if (settings.apiKey) {
+  if (providerReady()) {
     welcomeNoteEl.textContent = "Ready. I ask before I change anything.";
     welcomeNoteEl.classList.add("ok");
   } else {
@@ -414,6 +427,8 @@ function applySettings() {
         : `Add your ${providerName} API key in settings to get started.`;
     welcomeNoteEl.classList.remove("ok");
   }
+
+  restoreContextIndicator();
 }
 
 async function reloadSettings() {
@@ -423,10 +438,17 @@ async function reloadSettings() {
   } catch {
     settings = normalizeSettings({});
   }
+
+  const nextKey = modelSourceKey(settings);
+  if (nextKey !== previousKey) {
+    modelList = [];
+    modelListKey = "";
+  }
+
   applySettings();
   agent?.updateSettings(settings);
 
-  if (modelSourceKey(settings) !== previousKey || !modelList.length) {
+  if (nextKey !== previousKey || !modelList.length) {
     void loadModels();
   }
 }
@@ -888,7 +910,7 @@ async function send() {
   const text = promptEl.value.trim();
   if (!text || running) return;
 
-  if (!settings.apiKey) {
+  if (!providerReady()) {
     const target = settings.provider === "custom" ? "API" : providerLabel(settings.provider);
     addNotice(
       `No API key yet. Opening settings so you can add your ${target} key.`,
@@ -1203,6 +1225,8 @@ function wireEvents() {
 
     try {
       settings = await saveSettings({ provider });
+      modelList = [];
+      modelListKey = "";
       applySettings();
       agent?.updateSettings(settings);
       void loadModels({ force: true });

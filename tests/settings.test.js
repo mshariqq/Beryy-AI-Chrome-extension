@@ -118,6 +118,88 @@ test("normalizeSettings preserves an empty model fallback", () => {
   assert.equal(settings.model, DEFAULT_SETTINGS.model);
 });
 
+test("normalizeSettings includes Ollama defaults and validates options", () => {
+  const defaults = normalizeSettings({});
+  assert.equal(defaults.ollama.apiMode, "native");
+  assert.equal(defaults.ollama.keepAlive, "5m");
+  assert.equal(defaults.ollama.numCtx, 8192);
+  assert.equal(defaults.ollama.numPredict, 0);
+  assert.equal(defaults.ollama.useMmap, true);
+  assert.equal(defaults.ollama.useMlock, false);
+  assert.equal(defaults.ollama.requestTimeoutMs, 180000);
+
+  const custom = normalizeSettings({
+    provider: "ollama",
+    ollama: {
+      apiMode: "openai",
+      keepAlive: "1h",
+      numCtx: "4096",
+      numPredict: "999999",
+      numGpu: "4",
+      numThread: "8",
+      numBatch: "128",
+      numKeep: "16",
+      topK: "20",
+      topP: "2",
+      minP: "-1",
+      repeatPenalty: "1.2",
+      repeatLastN: "32",
+      presencePenalty: "0.5",
+      frequencyPenalty: "-3",
+      seed: "42",
+      stop: "END\nSTOP",
+      think: "high",
+      flashAttn: "on",
+      kvCacheType: "q8_0",
+      useMmap: "false",
+      useMlock: "yes",
+      requestTimeoutMs: "300000",
+      idleTimeoutMs: "150000"
+    }
+  });
+
+  assert.equal(custom.provider, "ollama");
+  assert.equal(custom.ollama.apiMode, "openai");
+  assert.equal(custom.ollama.keepAlive, "1h");
+  assert.equal(custom.ollama.numCtx, 4096);
+  assert.equal(custom.ollama.numPredict, 65536);
+  assert.equal(custom.ollama.numGpu, 4);
+  assert.equal(custom.ollama.numThread, 8);
+  assert.equal(custom.ollama.numBatch, 128);
+  assert.equal(custom.ollama.numKeep, 16);
+  assert.equal(custom.ollama.topK, 20);
+  assert.equal(custom.ollama.topP, 1);
+  assert.equal(custom.ollama.minP, 0);
+  assert.equal(custom.ollama.repeatPenalty, 1.2);
+  assert.equal(custom.ollama.repeatLastN, 32);
+  assert.equal(custom.ollama.presencePenalty, 0.5);
+  assert.equal(custom.ollama.frequencyPenalty, -2);
+  assert.equal(custom.ollama.seed, 42);
+  assert.equal(custom.ollama.stop, "END\nSTOP");
+  assert.equal(custom.ollama.think, "high");
+  assert.equal(custom.ollama.flashAttn, "on");
+  assert.equal(custom.ollama.kvCacheType, "q8_0");
+  assert.equal(custom.ollama.useMmap, false);
+  assert.equal(custom.ollama.useMlock, true);
+  assert.equal(custom.ollama.requestTimeoutMs, 300000);
+  assert.equal(custom.ollama.idleTimeoutMs, 150000);
+
+  const invalid = normalizeSettings({
+    ollama: {
+      apiMode: "bogus",
+      keepAlive: "soon",
+      think: "maximum",
+      flashAttn: "maybe",
+      kvCacheType: "q2"
+    }
+  });
+  assert.equal(invalid.ollama.apiMode, "native");
+  assert.equal(invalid.ollama.keepAlive, "5m");
+  assert.equal(invalid.ollama.think, "auto");
+  assert.equal(invalid.ollama.flashAttn, "auto");
+  assert.equal(invalid.ollama.kvCacheType, "");
+});
+
 test("normalizeSettings includes provider defaults", () => {
   const settings = normalizeSettings({});
 
@@ -129,6 +211,8 @@ test("normalizeSettings includes provider defaults", () => {
   assert.equal(settings.providerAccounts.groq.model, "openai/gpt-oss-120b");
   assert.equal(settings.providerAccounts.openrouter.baseUrl, "https://openrouter.ai/api/v1");
   assert.equal(settings.providerAccounts.openrouter.model, "openrouter/free");
+  assert.equal(settings.providerAccounts.ollama.baseUrl, "http://localhost:11434");
+  assert.equal(settings.providerAccounts.ollama.model, "llama3.2");
 });
 
 test("getSettings migrates Groq and OpenRouter base URLs", async () => {
@@ -302,4 +386,40 @@ test("saveSettings switches providers and keeps per-provider credentials", async
   assert.equal(nvidia.apiKey, "nv-key");
   assert.equal(nvidia.model, "meta/llama-3.3-70b-instruct");
   assert.equal(nvidia.providerAccounts.google.apiKey, "google-key");
+});
+
+test("saveSettings switches to keyless Ollama and stores Ollama options", async () => {
+  mockStorage({
+    provider: "nvidia",
+    providerAccounts: {
+      nvidia: {
+        baseUrl: "https://integrate.api.nvidia.com/v1",
+        apiKey: "nv-key",
+        model: "meta/llama-3.3-70b-instruct"
+      }
+    },
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    apiKey: "nv-key",
+    model: "meta/llama-3.3-70b-instruct"
+  });
+
+  const ollama = await saveSettings({
+    provider: "ollama",
+    ollama: { apiMode: "native", numCtx: 4096, keepAlive: "30m" }
+  });
+  assert.equal(ollama.provider, "ollama");
+  assert.equal(ollama.baseUrl, "http://localhost:11434");
+  assert.equal(ollama.apiKey, "");
+  assert.equal(ollama.model, "llama3.2");
+  assert.equal(ollama.ollama.numCtx, 4096);
+  assert.equal(ollama.ollama.keepAlive, "30m");
+
+  const changed = await saveSettings({ model: "qwen2.5:7b" });
+  assert.equal(changed.providerAccounts.ollama.model, "qwen2.5:7b");
+  assert.equal(changed.ollama.numCtx, 4096);
+
+  const nvidia = await saveSettings({ provider: "nvidia" });
+  assert.equal(nvidia.apiKey, "nv-key");
+  assert.equal(nvidia.model, "meta/llama-3.3-70b-instruct");
+  assert.equal(nvidia.ollama.numCtx, 4096);
 });

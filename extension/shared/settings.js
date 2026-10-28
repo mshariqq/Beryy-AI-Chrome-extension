@@ -9,6 +9,33 @@ import {
 
 const DEFAULT_ACCOUNTS = defaultProviderAccounts();
 
+export const DEFAULT_OLLAMA_SETTINGS = Object.freeze({
+  apiMode: "native",
+  keepAlive: "5m",
+  numCtx: 8192,
+  numPredict: 0,
+  numGpu: -1,
+  numThread: 0,
+  numBatch: 0,
+  numKeep: 0,
+  topK: 40,
+  topP: 0.9,
+  minP: 0,
+  repeatPenalty: 1.1,
+  repeatLastN: 64,
+  presencePenalty: 0,
+  frequencyPenalty: 0,
+  seed: -1,
+  stop: "",
+  think: "auto",
+  flashAttn: "auto",
+  kvCacheType: "",
+  useMmap: true,
+  useMlock: false,
+  requestTimeoutMs: 180000,
+  idleTimeoutMs: 120000
+});
+
 export const DEFAULT_SETTINGS = Object.freeze({
   provider: DEFAULT_PROVIDER,
   providerAccounts: DEFAULT_ACCOUNTS,
@@ -24,6 +51,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   googleTpm: 150000,
   googleRpd: 50,
   googleRpm: 10,
+  ollama: DEFAULT_OLLAMA_SETTINGS,
   permissionMode: "ask",
   blockedDomains: [],
   trustedDomains: [],
@@ -57,6 +85,100 @@ function flag(value, fallback) {
   }
   if (value === undefined || value === null || value === "") return fallback;
   return Boolean(value);
+}
+
+function ollamaNumber(value, fallback, min, max) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return Math.round(clampNumber(value, fallback, min, max));
+}
+
+function ollamaFloat(value, fallback, min, max) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return clampNumber(value, fallback, min, max);
+}
+
+export function normalizeOllamaSettings(input = {}) {
+  const merged = {
+    ...DEFAULT_OLLAMA_SETTINGS,
+    ...(input && typeof input === "object" && !Array.isArray(input) ? input : {})
+  };
+  const keepAlive = String(merged.keepAlive ?? "").trim();
+  const stop = Array.isArray(merged.stop)
+    ? merged.stop.join("\n")
+    : String(merged.stop ?? "");
+  const apiMode = ["native", "openai"].includes(merged.apiMode)
+    ? merged.apiMode
+    : DEFAULT_OLLAMA_SETTINGS.apiMode;
+  const think = ["auto", "on", "off", "low", "medium", "high"].includes(merged.think)
+    ? merged.think
+    : DEFAULT_OLLAMA_SETTINGS.think;
+  const flashAttn = ["auto", "on", "off"].includes(merged.flashAttn)
+    ? merged.flashAttn
+    : DEFAULT_OLLAMA_SETTINGS.flashAttn;
+  const kvCacheType = ["", "f16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1"].includes(
+    merged.kvCacheType
+  )
+    ? merged.kvCacheType
+    : DEFAULT_OLLAMA_SETTINGS.kvCacheType;
+
+  return {
+    apiMode,
+    keepAlive: /^(?:-1|\d+(?:\.\d+)?(?:ms|s|m|h)?)$/i.test(keepAlive)
+      ? keepAlive
+      : DEFAULT_OLLAMA_SETTINGS.keepAlive,
+    numCtx: ollamaNumber(merged.numCtx, DEFAULT_OLLAMA_SETTINGS.numCtx, 512, 1048576),
+    numPredict: ollamaNumber(merged.numPredict, DEFAULT_OLLAMA_SETTINGS.numPredict, 0, 65536),
+    numGpu: ollamaNumber(merged.numGpu, DEFAULT_OLLAMA_SETTINGS.numGpu, -1, 1000),
+    numThread: ollamaNumber(merged.numThread, DEFAULT_OLLAMA_SETTINGS.numThread, 0, 512),
+    numBatch: ollamaNumber(merged.numBatch, DEFAULT_OLLAMA_SETTINGS.numBatch, 0, 8192),
+    numKeep: ollamaNumber(merged.numKeep, DEFAULT_OLLAMA_SETTINGS.numKeep, 0, 65536),
+    topK: ollamaNumber(merged.topK, DEFAULT_OLLAMA_SETTINGS.topK, 0, 1000),
+    topP: ollamaFloat(merged.topP, DEFAULT_OLLAMA_SETTINGS.topP, 0, 1),
+    minP: ollamaFloat(merged.minP, DEFAULT_OLLAMA_SETTINGS.minP, 0, 1),
+    repeatPenalty: ollamaFloat(
+      merged.repeatPenalty,
+      DEFAULT_OLLAMA_SETTINGS.repeatPenalty,
+      0,
+      5
+    ),
+    repeatLastN: ollamaNumber(
+      merged.repeatLastN,
+      DEFAULT_OLLAMA_SETTINGS.repeatLastN,
+      0,
+      100000
+    ),
+    presencePenalty: ollamaFloat(
+      merged.presencePenalty,
+      DEFAULT_OLLAMA_SETTINGS.presencePenalty,
+      -2,
+      2
+    ),
+    frequencyPenalty: ollamaFloat(
+      merged.frequencyPenalty,
+      DEFAULT_OLLAMA_SETTINGS.frequencyPenalty,
+      -2,
+      2
+    ),
+    seed: ollamaNumber(merged.seed, DEFAULT_OLLAMA_SETTINGS.seed, -1, 2147483647),
+    stop: stop.slice(0, 4000),
+    think,
+    flashAttn,
+    kvCacheType,
+    useMmap: flag(merged.useMmap, DEFAULT_OLLAMA_SETTINGS.useMmap),
+    useMlock: flag(merged.useMlock, DEFAULT_OLLAMA_SETTINGS.useMlock),
+    requestTimeoutMs: ollamaNumber(
+      merged.requestTimeoutMs,
+      DEFAULT_OLLAMA_SETTINGS.requestTimeoutMs,
+      5000,
+      1800000
+    ),
+    idleTimeoutMs: ollamaNumber(
+      merged.idleTimeoutMs,
+      DEFAULT_OLLAMA_SETTINGS.idleTimeoutMs,
+      5000,
+      1800000
+    )
+  };
 }
 
 function inferProvider(input) {
@@ -132,6 +254,7 @@ export function normalizeSettings(input = {}) {
     googleRpm: Math.round(
       clampNumber(merged.googleRpm, DEFAULT_SETTINGS.googleRpm, 1, 100000)
     ),
+    ollama: normalizeOllamaSettings(merged.ollama),
     permissionMode,
     blockedDomains: list(merged.blockedDomains),
     trustedDomains: list(merged.trustedDomains),

@@ -6,8 +6,11 @@ import {
 } from "../shared/settings.js";
 import {
   PROVIDERS,
+  chatCompletionsUrl,
+  ollamaRootUrl,
   providerDefaults,
-  providerPreset
+  providerPreset,
+  providerRequiresApiKey
 } from "../shared/providers.js";
 
 const $ = (id) => document.getElementById(id);
@@ -15,6 +18,8 @@ const $ = (id) => document.getElementById(id);
 const form = $("settings-form");
 const providerInput = $("provider");
 const providerNote = $("provider-note");
+const apiKeyLabel = $("api-key-label");
+const apiKeyHint = $("api-key-hint");
 const apiKeyInput = $("apiKey");
 const baseUrlInput = $("baseUrl");
 const modelInput = $("model");
@@ -29,6 +34,32 @@ const googleTpmInput = $("googleTpm");
 const googleRpdInput = $("googleRpd");
 const googleRpmInput = $("googleRpm");
 const googleRateLimitRow = $("google-rate-limit-row");
+const ollamaSettings = $("ollama-settings");
+const ollamaApiModeInput = $("ollamaApiMode");
+const ollamaKeepAliveInput = $("ollamaKeepAlive");
+const ollamaPresetInput = $("ollamaPreset");
+const ollamaNumCtxInput = $("ollamaNumCtx");
+const ollamaNumGpuInput = $("ollamaNumGpu");
+const ollamaNumThreadInput = $("ollamaNumThread");
+const ollamaNumBatchInput = $("ollamaNumBatch");
+const ollamaNumKeepInput = $("ollamaNumKeep");
+const ollamaNumPredictInput = $("ollamaNumPredict");
+const ollamaTopKInput = $("ollamaTopK");
+const ollamaTopPInput = $("ollamaTopP");
+const ollamaMinPInput = $("ollamaMinP");
+const ollamaRepeatPenaltyInput = $("ollamaRepeatPenalty");
+const ollamaRepeatLastNInput = $("ollamaRepeatLastN");
+const ollamaPresencePenaltyInput = $("ollamaPresencePenalty");
+const ollamaFrequencyPenaltyInput = $("ollamaFrequencyPenalty");
+const ollamaSeedInput = $("ollamaSeed");
+const ollamaStopInput = $("ollamaStop");
+const ollamaThinkInput = $("ollamaThink");
+const ollamaFlashAttnInput = $("ollamaFlashAttn");
+const ollamaKvCacheTypeInput = $("ollamaKvCacheType");
+const ollamaUseMmapInput = $("ollamaUseMmap");
+const ollamaUseMlockInput = $("ollamaUseMlock");
+const ollamaRequestTimeoutMsInput = $("ollamaRequestTimeoutMs");
+const ollamaIdleTimeoutMsInput = $("ollamaIdleTimeoutMs");
 const permissionModeInput = $("permissionMode");
 const blockedDomainsInput = $("blockedDomains");
 const trustedDomainsInput = $("trustedDomains");
@@ -55,8 +86,16 @@ function syncPacingControls() {
 }
 
 function syncProviderControls() {
-  nvidiaRateLimitRow.hidden = providerInput.value !== "nvidia";
-  googleRateLimitRow.hidden = providerInput.value !== "google";
+  const provider = providerInput.value;
+  nvidiaRateLimitRow.hidden = provider !== "nvidia";
+  googleRateLimitRow.hidden = provider !== "google";
+  ollamaSettings.hidden = provider !== "ollama";
+
+  const requiresKey = providerRequiresApiKey(provider);
+  apiKeyLabel.textContent = requiresKey ? "API key" : "API key (optional)";
+  apiKeyHint.innerHTML = requiresKey
+    ? "Stored in <code>chrome.storage.local</code> for this profile. It is sent only to the selected provider's base URL."
+    : "Not needed for local Ollama. Set one only when Ollama is behind a proxy that requires a bearer token.";
 }
 
 function providerAccountFromForm() {
@@ -65,6 +104,151 @@ function providerAccountFromForm() {
     apiKey: apiKeyInput.value.trim(),
     model: modelInput.value.trim()
   };
+}
+
+function ollamaFromForm() {
+  return {
+    apiMode: ollamaApiModeInput.value,
+    keepAlive: ollamaKeepAliveInput.value.trim(),
+    numCtx: ollamaNumCtxInput.value,
+    numGpu: ollamaNumGpuInput.value,
+    numThread: ollamaNumThreadInput.value,
+    numBatch: ollamaNumBatchInput.value,
+    numKeep: ollamaNumKeepInput.value,
+    numPredict: ollamaNumPredictInput.value,
+    topK: ollamaTopKInput.value,
+    topP: ollamaTopPInput.value,
+    minP: ollamaMinPInput.value,
+    repeatPenalty: ollamaRepeatPenaltyInput.value,
+    repeatLastN: ollamaRepeatLastNInput.value,
+    presencePenalty: ollamaPresencePenaltyInput.value,
+    frequencyPenalty: ollamaFrequencyPenaltyInput.value,
+    seed: ollamaSeedInput.value,
+    stop: ollamaStopInput.value,
+    think: ollamaThinkInput.value,
+    flashAttn: ollamaFlashAttnInput.value,
+    kvCacheType: ollamaKvCacheTypeInput.value,
+    useMmap: ollamaUseMmapInput.checked,
+    useMlock: ollamaUseMlockInput.checked,
+    requestTimeoutMs: ollamaRequestTimeoutMsInput.value,
+    idleTimeoutMs: ollamaIdleTimeoutMsInput.value
+  };
+}
+
+function applyOllamaPreset(name) {
+  const presets = {
+    fast: {
+      keepAlive: "30m",
+      numCtx: 4096,
+      numGpu: -1,
+      numThread: 0,
+      numBatch: 128,
+      numKeep: 0,
+      numPredict: 1024,
+      topK: 20,
+      topP: 0.8,
+      minP: 0,
+      repeatPenalty: 1.05,
+      repeatLastN: 32,
+      presencePenalty: 0,
+      frequencyPenalty: 0,
+      seed: -1,
+      think: "off",
+      flashAttn: "auto",
+      kvCacheType: "",
+      useMmap: true,
+      useMlock: false
+    },
+    balanced: {
+      keepAlive: "5m",
+      numCtx: 8192,
+      numGpu: -1,
+      numThread: 0,
+      numBatch: 0,
+      numKeep: 0,
+      numPredict: 0,
+      topK: 40,
+      topP: 0.9,
+      minP: 0,
+      repeatPenalty: 1.1,
+      repeatLastN: 64,
+      presencePenalty: 0,
+      frequencyPenalty: 0,
+      seed: -1,
+      think: "auto",
+      flashAttn: "auto",
+      kvCacheType: "",
+      useMmap: true,
+      useMlock: false
+    },
+    quality: {
+      keepAlive: "5m",
+      numCtx: 16384,
+      numGpu: -1,
+      numThread: 0,
+      numBatch: 0,
+      numKeep: 0,
+      numPredict: 0,
+      topK: 64,
+      topP: 0.95,
+      minP: 0.02,
+      repeatPenalty: 1.15,
+      repeatLastN: 128,
+      presencePenalty: 0,
+      frequencyPenalty: 0,
+      seed: -1,
+      think: "auto",
+      flashAttn: "auto",
+      kvCacheType: "",
+      useMmap: true,
+      useMlock: false
+    },
+    cpu: {
+      keepAlive: "30m",
+      numCtx: 4096,
+      numGpu: 0,
+      numThread: 0,
+      numBatch: 64,
+      numKeep: 0,
+      numPredict: 1024,
+      topK: 20,
+      topP: 0.8,
+      minP: 0,
+      repeatPenalty: 1.05,
+      repeatLastN: 32,
+      presencePenalty: 0,
+      frequencyPenalty: 0,
+      seed: -1,
+      think: "off",
+      flashAttn: "off",
+      kvCacheType: "",
+      useMmap: true,
+      useMlock: false
+    }
+  };
+  const preset = presets[name];
+  if (!preset) return;
+
+  ollamaKeepAliveInput.value = preset.keepAlive;
+  ollamaNumCtxInput.value = preset.numCtx;
+  ollamaNumGpuInput.value = preset.numGpu;
+  ollamaNumThreadInput.value = preset.numThread;
+  ollamaNumBatchInput.value = preset.numBatch;
+  ollamaNumKeepInput.value = preset.numKeep;
+  ollamaNumPredictInput.value = preset.numPredict;
+  ollamaTopKInput.value = preset.topK;
+  ollamaTopPInput.value = preset.topP;
+  ollamaMinPInput.value = preset.minP;
+  ollamaRepeatPenaltyInput.value = preset.repeatPenalty;
+  ollamaRepeatLastNInput.value = preset.repeatLastN;
+  ollamaPresencePenaltyInput.value = preset.presencePenalty;
+  ollamaFrequencyPenaltyInput.value = preset.frequencyPenalty;
+  ollamaSeedInput.value = preset.seed;
+  ollamaThinkInput.value = preset.think;
+  ollamaFlashAttnInput.value = preset.flashAttn;
+  ollamaKvCacheTypeInput.value = preset.kvCacheType;
+  ollamaUseMmapInput.checked = preset.useMmap;
+  ollamaUseMlockInput.checked = preset.useMlock;
 }
 
 function fillProviderFields(settings, provider) {
@@ -106,6 +290,32 @@ function populate(settings) {
   googleTpmInput.value = settings.googleTpm;
   googleRpdInput.value = settings.googleRpd;
   googleRpmInput.value = settings.googleRpm;
+  const ollama = settings.ollama || {};
+  ollamaApiModeInput.value = ollama.apiMode || "native";
+  ollamaKeepAliveInput.value = ollama.keepAlive ?? "5m";
+  ollamaPresetInput.value = "";
+  ollamaNumCtxInput.value = ollama.numCtx ?? 8192;
+  ollamaNumGpuInput.value = ollama.numGpu ?? -1;
+  ollamaNumThreadInput.value = ollama.numThread ?? 0;
+  ollamaNumBatchInput.value = ollama.numBatch ?? 0;
+  ollamaNumKeepInput.value = ollama.numKeep ?? 0;
+  ollamaNumPredictInput.value = ollama.numPredict ?? 0;
+  ollamaTopKInput.value = ollama.topK ?? 40;
+  ollamaTopPInput.value = ollama.topP ?? 0.9;
+  ollamaMinPInput.value = ollama.minP ?? 0;
+  ollamaRepeatPenaltyInput.value = ollama.repeatPenalty ?? 1.1;
+  ollamaRepeatLastNInput.value = ollama.repeatLastN ?? 64;
+  ollamaPresencePenaltyInput.value = ollama.presencePenalty ?? 0;
+  ollamaFrequencyPenaltyInput.value = ollama.frequencyPenalty ?? 0;
+  ollamaSeedInput.value = ollama.seed ?? -1;
+  ollamaStopInput.value = ollama.stop || "";
+  ollamaThinkInput.value = ollama.think || "auto";
+  ollamaFlashAttnInput.value = ollama.flashAttn || "auto";
+  ollamaKvCacheTypeInput.value = ollama.kvCacheType || "";
+  ollamaUseMmapInput.checked = ollama.useMmap !== false;
+  ollamaUseMlockInput.checked = Boolean(ollama.useMlock);
+  ollamaRequestTimeoutMsInput.value = ollama.requestTimeoutMs ?? 180000;
+  ollamaIdleTimeoutMsInput.value = ollama.idleTimeoutMs ?? 120000;
   permissionModeInput.value = settings.permissionMode;
   blockedDomainsInput.value = (settings.blockedDomains || []).join("\n");
   trustedDomainsInput.value = (settings.trustedDomains || []).join("\n");
@@ -136,6 +346,7 @@ function readForm() {
     googleTpm: googleTpmInput.value,
     googleRpd: googleRpdInput.value,
     googleRpm: googleRpmInput.value,
+    ollama: ollamaFromForm(),
     permissionMode: permissionModeInput.value,
     blockedDomains: blockedDomainsInput.value,
     trustedDomains: trustedDomainsInput.value,
@@ -149,6 +360,9 @@ function readForm() {
 
 providerInput.addEventListener("change", () => switchProvider(providerInput.value));
 antiBotGuardInput.addEventListener("change", syncPacingControls);
+ollamaPresetInput.addEventListener("change", () => {
+  applyOllamaPreset(ollamaPresetInput.value);
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -163,7 +377,7 @@ form.addEventListener("submit", async (event) => {
 
 testButton.addEventListener("click", async () => {
   const current = readForm();
-  if (!current.apiKey) {
+  if (providerRequiresApiKey(current.provider) && !current.apiKey) {
     setStatus("Add an API key first.", "err");
     return;
   }
@@ -171,23 +385,43 @@ testButton.addEventListener("click", async () => {
   testButton.disabled = true;
   setStatus("Testing…");
 
+  const nativeOllama =
+    current.provider === "ollama" && current.ollama?.apiMode !== "openai";
+  const timeoutMs =
+    current.provider === "ollama"
+      ? Math.max(5000, Number(current.ollama?.requestTimeoutMs) || 180000)
+      : 30000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${current.baseUrl}/chat/completions`, {
+    const headers = { "Content-Type": "application/json" };
+    if (current.apiKey) headers.Authorization = `Bearer ${current.apiKey}`;
+
+    const body = nativeOllama
+      ? {
+          model: current.model,
+          messages: [{ role: "user", content: "Reply with exactly: OK" }],
+          stream: false,
+          keep_alive: current.ollama?.keepAlive || "5m",
+          options: {
+            temperature: 0,
+            num_predict: 16,
+            num_ctx: Number(current.ollama?.numCtx) || 4096
+          }
+        }
+      : {
+          model: current.model,
+          messages: [{ role: "user", content: "Reply with exactly: OK" }],
+          max_tokens: 16,
+          temperature: 0,
+          stream: false
+        };
+
+    const response = await fetch(chatCompletionsUrl(current), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${current.apiKey}`
-      },
-      body: JSON.stringify({
-        model: current.model,
-        messages: [{ role: "user", content: "Reply with exactly: OK" }],
-        max_tokens: 16,
-        temperature: 0,
-        stream: false
-      }),
+      headers,
+      body: JSON.stringify(body),
       signal: controller.signal
     });
 
@@ -196,7 +430,7 @@ testButton.addEventListener("click", async () => {
       let detail = raw;
       try {
         const parsed = JSON.parse(raw);
-        detail = parsed?.error?.message || parsed?.detail || raw;
+        detail = parsed?.error?.message || parsed?.error || parsed?.detail || raw;
       } catch {
         // Keep raw text.
       }
@@ -206,16 +440,25 @@ testButton.addEventListener("click", async () => {
     let content = "";
     try {
       const parsed = JSON.parse(raw);
-      content = parsed?.choices?.[0]?.message?.content || "";
+      content = nativeOllama
+        ? parsed?.message?.content || ""
+        : parsed?.choices?.[0]?.message?.content || "";
     } catch {
       content = raw;
     }
     setStatus(`Connected. Model replied: ${String(content).trim().slice(0, 120) || "(empty)"}`, "ok");
   } catch (error) {
-    const message =
+    let message =
       error?.name === "AbortError"
-        ? "Test timed out after 30 seconds."
+        ? `Test timed out after ${Math.round(timeoutMs / 1000)} seconds.`
         : String(error?.message || error);
+
+    if (
+      current.provider === "ollama" &&
+      /failed to fetch|networkerror|load failed/i.test(message)
+    ) {
+      message = `Could not reach Ollama at ${ollamaRootUrl(current.baseUrl)}. Start it with "ollama serve" and set OLLAMA_ORIGINS to this extension's origin (or * for local use).`;
+    }
     setStatus(message, "err");
   } finally {
     clearTimeout(timer);

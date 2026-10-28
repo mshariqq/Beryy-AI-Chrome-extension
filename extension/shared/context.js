@@ -21,6 +21,15 @@ export function contextWindowFor(model) {
   return DEFAULT_CONTEXT_WINDOW;
 }
 
+export function contextWindowForSettings(settings) {
+  const modelWindow = contextWindowFor(settings?.model);
+  if (settings?.provider !== "ollama") return modelWindow;
+
+  const numCtx = Number(settings?.ollama?.numCtx);
+  if (!Number.isFinite(numCtx) || numCtx <= 0) return modelWindow;
+  return Math.min(modelWindow, Math.round(numCtx));
+}
+
 export function estimateTextTokens(text) {
   if (typeof text !== "string" || !text) return 0;
   return Math.ceil(text.length / 3.5);
