@@ -243,6 +243,23 @@ test("normalizeSettings accepts the NVIDIA rate limit toggle", () => {
   assert.equal(normalizeSettings({ nvidiaRateLimit: "off" }).nvidiaRateLimit, false);
 });
 
+test("normalizeSettings clamps the NVIDIA request timeout", () => {
+  const defaults = normalizeSettings({});
+  assert.equal(defaults.nvidiaRequestTimeoutMs, 180000);
+  assert.equal(
+    normalizeSettings({ nvidiaRequestTimeoutMs: 30000 }).nvidiaRequestTimeoutMs,
+    30000
+  );
+  assert.equal(
+    normalizeSettings({ nvidiaRequestTimeoutMs: 1 }).nvidiaRequestTimeoutMs,
+    5000
+  );
+  assert.equal(
+    normalizeSettings({ nvidiaRequestTimeoutMs: 9999999 }).nvidiaRequestTimeoutMs,
+    1800000
+  );
+});
+
 test("normalizeSettings includes configurable Google TPM, RPD, and RPM", () => {
   const defaults = normalizeSettings({});
   assert.equal(defaults.googleTpm, 150000);

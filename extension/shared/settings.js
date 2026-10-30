@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   toolMode: "auto",
   vision: false,
   nvidiaRateLimit: true,
+  nvidiaRequestTimeoutMs: 180000,
   googleTpm: 150000,
   googleRpd: 50,
   googleRpm: 10,
@@ -245,6 +246,14 @@ export function normalizeSettings(input = {}) {
     toolMode,
     vision: flag(merged.vision, DEFAULT_SETTINGS.vision),
     nvidiaRateLimit: flag(merged.nvidiaRateLimit, DEFAULT_SETTINGS.nvidiaRateLimit),
+    nvidiaRequestTimeoutMs: Math.round(
+      clampNumber(
+        merged.nvidiaRequestTimeoutMs,
+        DEFAULT_SETTINGS.nvidiaRequestTimeoutMs,
+        5000,
+        1800000
+      )
+    ),
     googleTpm: Math.round(
       clampNumber(merged.googleTpm, DEFAULT_SETTINGS.googleTpm, 1000, 100000000)
     ),

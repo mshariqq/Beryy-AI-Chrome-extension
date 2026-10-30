@@ -766,6 +766,45 @@ test("streamChat explains an Ollama origin rejection", async () => {
   }
 });
 
+test("streamChat uses NVIDIA request timeout from settings", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (url, options) =>
+    new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    });
+
+  try {
+    await assert.rejects(
+      streamChat({
+        settings: {
+          provider: "nvidia",
+          baseUrl: "https://integrate.api.nvidia.com/v1",
+          apiKey: "nv-key",
+          model: "meta/llama-3.3-70b-instruct",
+          temperature: 0,
+          maxTokens: 64,
+          toolMode: "prompt",
+          nvidiaRequestTimeoutMs: 10
+        },
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+        forcePrompt: true
+      }),
+      (error) => {
+        assert.equal(error instanceof ProviderTimeoutError, true);
+        assert.match(error.message, /NVIDIA did not start responding/);
+        assert.match(error.message, /request timeout/);
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamChat uses Ollama request timeout from settings", async () => {
   const originalFetch = globalThis.fetch;
 

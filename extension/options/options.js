@@ -30,6 +30,8 @@ const toolModeInput = $("toolMode");
 const visionInput = $("vision");
 const nvidiaRateLimitInput = $("nvidiaRateLimit");
 const nvidiaRateLimitRow = $("nvidia-rate-limit-row");
+const nvidiaRequestTimeoutMsInput = $("nvidiaRequestTimeoutMs");
+const nvidiaTimeoutRow = $("nvidia-timeout-row");
 const googleTpmInput = $("googleTpm");
 const googleRpdInput = $("googleRpd");
 const googleRpmInput = $("googleRpm");
@@ -88,6 +90,7 @@ function syncPacingControls() {
 function syncProviderControls() {
   const provider = providerInput.value;
   nvidiaRateLimitRow.hidden = provider !== "nvidia";
+  nvidiaTimeoutRow.hidden = provider !== "nvidia";
   googleRateLimitRow.hidden = provider !== "google";
   ollamaSettings.hidden = provider !== "ollama";
 
@@ -287,6 +290,7 @@ function populate(settings) {
   toolModeInput.value = settings.toolMode;
   visionInput.checked = Boolean(settings.vision);
   nvidiaRateLimitInput.checked = settings.nvidiaRateLimit !== false;
+  nvidiaRequestTimeoutMsInput.value = settings.nvidiaRequestTimeoutMs ?? 180000;
   googleTpmInput.value = settings.googleTpm;
   googleRpdInput.value = settings.googleRpd;
   googleRpmInput.value = settings.googleRpm;
@@ -343,6 +347,7 @@ function readForm() {
     toolMode: toolModeInput.value,
     vision: visionInput.checked,
     nvidiaRateLimit: nvidiaRateLimitInput.checked,
+    nvidiaRequestTimeoutMs: nvidiaRequestTimeoutMsInput.value,
     googleTpm: googleTpmInput.value,
     googleRpd: googleRpdInput.value,
     googleRpm: googleRpmInput.value,

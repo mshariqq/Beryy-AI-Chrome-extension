@@ -19,6 +19,7 @@ export const REQUEST_TIMEOUT_MS = 60000;
 export const STREAM_IDLE_MS = 90000;
 export const GOOGLE_REQUEST_TIMEOUT_MS = 180000;
 export const GOOGLE_STREAM_IDLE_MS = 120000;
+export const NVIDIA_REQUEST_TIMEOUT_MS = 180000;
 
 const MAX_RATE_LIMIT_RETRIES = 4;
 const MAX_TRANSIENT_RETRIES = 6;
@@ -183,6 +184,9 @@ function timeoutMessage(settings, timeoutMs) {
   }
   if (settings.provider === "google") {
     return `Google did not start responding within ${seconds} seconds. Gemma 4 31B can be slow on the free tier; try gemma-4-26b-a4b-it or retry.`;
+  }
+  if (settings.provider === "nvidia") {
+    return `NVIDIA did not start responding within ${seconds} seconds. Increase the NVIDIA request timeout or retry.`;
   }
   return `The provider did not respond within ${seconds} seconds.`;
 }
@@ -1004,6 +1008,7 @@ export async function streamChat({
   }
 
   const google = settings.provider === "google";
+  const nvidia = settings.provider === "nvidia";
   const ollama = settings.provider === "ollama";
   let effectiveTimeoutMs =
     google && timeoutMs === REQUEST_TIMEOUT_MS
@@ -1013,6 +1018,12 @@ export async function streamChat({
     google && idleTimeoutMs === STREAM_IDLE_MS
       ? GOOGLE_STREAM_IDLE_MS
       : idleTimeoutMs;
+
+  if (nvidia && timeoutMs === REQUEST_TIMEOUT_MS) {
+    const requestTimeout = Number(settings.nvidiaRequestTimeoutMs);
+    effectiveTimeoutMs =
+      requestTimeout > 0 ? requestTimeout : NVIDIA_REQUEST_TIMEOUT_MS;
+  }
 
   if (ollama) {
     const requestTimeout = Number(settings.ollama?.requestTimeoutMs);

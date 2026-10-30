@@ -100,6 +100,12 @@
             </span>
           </label>
 
+          <label class="field" id="nvidia-timeout-row" hidden>
+            <span>NVIDIA request timeout (ms)</span>
+            <input id="nvidiaRequestTimeoutMs" name="nvidiaRequestTimeoutMs" type="number" min="5000" max="1800000" step="1000" />
+            <small>How long Beryy waits for NVIDIA to start responding. Increase this for cold or queued models.</small>
+          </label>
+
           <div class="field" id="google-rate-limit-row" hidden>
             <span>Google API rate limits</span>
             <div class="grid three">
