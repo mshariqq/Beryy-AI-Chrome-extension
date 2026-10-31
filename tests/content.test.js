@@ -4,7 +4,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-import { coveredClickError, describeClickOutcome } from "../extension/lib/tools.js";
+import {
+  coordinateScrollTarget,
+  coordinateTargetError,
+  coordinateViewportError,
+  coveredClickError,
+  describeClickOutcome
+} from "../extension/lib/tools.js";
 import { frameTokenFromRef } from "../extension/lib/content.js";
 
 const contentSource = readFileSync(
@@ -38,6 +44,8 @@ function element({
     src: null,
     id,
     className,
+    style: {},
+    offsetWidth: 0,
     tabIndex: -1,
     onclick: null,
     isContentEditable: false,
@@ -45,11 +53,29 @@ function element({
     options: [],
     checkVisibility: () => true,
     getAttribute: (name) => attributes.get(name) ?? null,
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
     getBoundingClientRect: () => rect,
     scrollIntoView() {},
+    focus() {},
     contains: (candidate) => candidate === node,
     querySelectorAll: () => [],
-    closest: () => null
+    closest: () => null,
+    appendChild(child) {
+      children.push(child);
+      return child;
+    },
+    append(...nodes) {
+      children.push(...nodes);
+    },
+    attachShadow() {
+      node.shadowRoot = element({ tag: "shadow-root" });
+      return node.shadowRoot;
+    },
+    animate() {
+      return {};
+    }
   };
 
   return node;
@@ -78,6 +104,8 @@ function loadContent({ top } = {}) {
   const document = {
     body: null,
     documentElement: null,
+    createElement: (tag) => element({ tag }),
+    createElementNS: (namespace, tag) => element({ tag, namespace }),
     elementFromPoint: () => null,
     querySelectorAll: () => [],
     getElementById: () => null
@@ -92,6 +120,7 @@ function loadContent({ top } = {}) {
     CSS: { escape: (value) => String(value) },
     console,
     setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (timer) => clearTimeout(timer),
     setInterval: (fn, ms) => setInterval(fn, ms)
   });
 
@@ -105,7 +134,7 @@ function loadContent({ top } = {}) {
       });
     });
 
-  return { call, document };
+  return { call, document, window };
 }
 
 function setBody(document, body) {
@@ -204,8 +233,118 @@ test("point state reports the element under the click", async () => {
   const state = await call({ type: "getPointState", x: 10, y: 20 });
 
   assert.equal(state.description, '<button "Like">');
+  assert.equal(state.tag, "button");
   assert.equal(state.role, "button");
   assert.equal(state.ariaLabel, "Like");
+});
+
+test("contenteditable editor refs report textbox state and can be selected", async () => {
+  const target = element({
+    tag: "div",
+    role: "textbox",
+    label: "README editor",
+    className: "cm-content"
+  });
+  target.isContentEditable = true;
+  const body = element({ tag: "body", children: [target] });
+
+  const { call, document, window } = loadContent();
+  setBody(document, body);
+
+  const tree = await call({
+    type: "generateAccessibilityTree",
+    options: { filter: "interactive", max_chars: 10000 }
+  });
+  const ref = refFor(tree, "README editor");
+
+  const state = await call({ type: "getRefState", ref });
+  assert.equal(state.role, "textbox");
+  assert.equal(state.contentEditable, true);
+
+  const range = {
+    node: null,
+    selectNodeContents(node) {
+      this.node = node;
+    }
+  };
+  let added = null;
+  window.getSelection = () => ({
+    removeAllRanges() {},
+    addRange(value) {
+      added = value;
+    }
+  });
+  document.createRange = () => range;
+
+  assert.equal(await call({ type: "selectRefText", ref }), true);
+  assert.equal(range.node, target);
+  assert.equal(added, range);
+});
+
+test("virtual cursor renders at viewport coordinates and can be hidden", async () => {
+  const body = element({ tag: "body" });
+  const { call, document } = loadContent();
+  setBody(document, body);
+
+  assert.equal(
+    await call({ type: "showVirtualCursor", x: 123.5, y: 234.5, pulse: true }),
+    true
+  );
+
+  const host = body.children.find((child) => child.id === "__bery_virtual_cursor");
+  assert.ok(host);
+  assert.match(host.style.cssText, /position:fixed/);
+  assert.match(host.style.cssText, /pointer-events:none/);
+  assert.equal(host.shadowRoot.children.length, 2);
+  assert.match(
+    host.shadowRoot.children[1].style.transform,
+    /translate3d\(123\.5px, 234\.5px, 0\)/
+  );
+
+  const shown = await call({ type: "getVirtualCursorState" });
+  assert.equal(shown.visible, true);
+  assert.equal(shown.x, 123.5);
+  assert.equal(shown.y, 234.5);
+
+  assert.equal(await call({ type: "hideVirtualCursor" }), true);
+  assert.equal((await call({ type: "getVirtualCursorState" })).visible, false);
+});
+
+test("coordinate clicks outside the viewport are rejected", () => {
+  const viewport = { width: 1353, height: 746 };
+
+  assert.match(
+    coordinateViewportError(710, 930, viewport),
+    /outside the visible viewport \(1353x746 CSS px\)/
+  );
+  assert.equal(coordinateViewportError(710, 745, viewport), "");
+  assert.equal(coordinateViewportError(0, 0, viewport), "");
+  assert.match(coordinateViewportError("x", 10, viewport), /finite numbers/);
+});
+
+test("out-of-viewport clicks compute a scroll toward the requested point", () => {
+  const viewport = { width: 1353, height: 746 };
+
+  assert.equal(coordinateScrollTarget(725, 730, viewport), null);
+  const nearBottom = coordinateScrollTarget(725, 770, viewport);
+  assert.equal(nearBottom.targetX, 725);
+  assert.equal(nearBottom.targetY, 665);
+  assert.equal(nearBottom.dx, 0);
+  assert.equal(nearBottom.dy, 105);
+
+  const farBottom = coordinateScrollTarget(725, 950, viewport);
+  assert.equal(farBottom.targetY, 665);
+  assert.equal(farBottom.dy, 285);
+
+  assert.equal(coordinateScrollTarget(725, 5000, viewport), null);
+});
+
+test("coordinate clicks on page containers are rejected", () => {
+  assert.match(
+    coordinateTargetError({ tag: "main", role: "main", description: "<main ref_10>" }),
+    /page container, not a control/
+  );
+  assert.equal(coordinateTargetError({ tag: "button", role: "button" }), "");
 });
 
 test("point state resolves the interactive ancestor", async () => {

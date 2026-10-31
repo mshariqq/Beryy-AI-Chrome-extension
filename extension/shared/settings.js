@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   toolMode: "auto",
   vision: false,
   nvidiaRateLimit: true,
-  nvidiaRequestTimeoutMs: 180000,
+  nvidiaRequestTimeoutMs: 1000000,
   googleTpm: 150000,
   googleRpd: 50,
   googleRpm: 10,
@@ -59,6 +59,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   blockTrackers: true,
   trackerAllowlist: [],
   antiBotGuard: true,
+  virtualCursor: true,
   actionDelayMs: 450,
   systemPromptExtra: ""
 });
@@ -128,11 +129,21 @@ export function normalizeOllamaSettings(input = {}) {
       ? keepAlive
       : DEFAULT_OLLAMA_SETTINGS.keepAlive,
     numCtx: ollamaNumber(merged.numCtx, DEFAULT_OLLAMA_SETTINGS.numCtx, 512, 1048576),
-    numPredict: ollamaNumber(merged.numPredict, DEFAULT_OLLAMA_SETTINGS.numPredict, 0, 65536),
+    numPredict: ollamaNumber(
+      merged.numPredict,
+      DEFAULT_OLLAMA_SETTINGS.numPredict,
+      0,
+      Number.MAX_SAFE_INTEGER
+    ),
     numGpu: ollamaNumber(merged.numGpu, DEFAULT_OLLAMA_SETTINGS.numGpu, -1, 1000),
     numThread: ollamaNumber(merged.numThread, DEFAULT_OLLAMA_SETTINGS.numThread, 0, 512),
     numBatch: ollamaNumber(merged.numBatch, DEFAULT_OLLAMA_SETTINGS.numBatch, 0, 8192),
-    numKeep: ollamaNumber(merged.numKeep, DEFAULT_OLLAMA_SETTINGS.numKeep, 0, 65536),
+    numKeep: ollamaNumber(
+      merged.numKeep,
+      DEFAULT_OLLAMA_SETTINGS.numKeep,
+      0,
+      Number.MAX_SAFE_INTEGER
+    ),
     topK: ollamaNumber(merged.topK, DEFAULT_OLLAMA_SETTINGS.topK, 0, 1000),
     topP: ollamaFloat(merged.topP, DEFAULT_OLLAMA_SETTINGS.topP, 0, 1),
     minP: ollamaFloat(merged.minP, DEFAULT_OLLAMA_SETTINGS.minP, 0, 1),
@@ -241,17 +252,26 @@ export function normalizeSettings(input = {}) {
     apiKey: active.apiKey,
     model: active.model,
     temperature: clampNumber(merged.temperature, DEFAULT_SETTINGS.temperature, 0, 2),
-    maxTokens: Math.round(clampNumber(merged.maxTokens, DEFAULT_SETTINGS.maxTokens, 64, 65536)),
+    maxTokens: Math.round(
+      clampNumber(
+        merged.maxTokens,
+        DEFAULT_SETTINGS.maxTokens,
+        64,
+        Number.MAX_SAFE_INTEGER
+      )
+    ),
     maxSteps: Math.round(clampNumber(merged.maxSteps, DEFAULT_SETTINGS.maxSteps, 1, 800)),
     toolMode,
     vision: flag(merged.vision, DEFAULT_SETTINGS.vision),
     nvidiaRateLimit: flag(merged.nvidiaRateLimit, DEFAULT_SETTINGS.nvidiaRateLimit),
     nvidiaRequestTimeoutMs: Math.round(
       clampNumber(
-        merged.nvidiaRequestTimeoutMs,
+        Number(merged.nvidiaRequestTimeoutMs) === 180000
+          ? DEFAULT_SETTINGS.nvidiaRequestTimeoutMs
+          : merged.nvidiaRequestTimeoutMs,
         DEFAULT_SETTINGS.nvidiaRequestTimeoutMs,
         5000,
-        1800000
+        3600000
       )
     ),
     googleTpm: Math.round(
@@ -270,6 +290,7 @@ export function normalizeSettings(input = {}) {
     blockTrackers: flag(merged.blockTrackers, DEFAULT_SETTINGS.blockTrackers),
     trackerAllowlist: list(merged.trackerAllowlist),
     antiBotGuard: flag(merged.antiBotGuard, DEFAULT_SETTINGS.antiBotGuard),
+    virtualCursor: flag(merged.virtualCursor, DEFAULT_SETTINGS.virtualCursor),
     actionDelayMs: Math.round(
       clampNumber(merged.actionDelayMs, DEFAULT_SETTINGS.actionDelayMs, 0, 5000)
     ),

@@ -69,7 +69,7 @@
             </label>
             <label class="field">
               <span>Max output tokens</span>
-              <input id="maxTokens" name="maxTokens" type="number" min="64" max="65536" step="1" />
+              <input id="maxTokens" name="maxTokens" type="number" min="64" step="1" />
             </label>
             <label class="field">
               <span>Max agent steps</span>
@@ -102,7 +102,7 @@
 
           <label class="field" id="nvidia-timeout-row" hidden>
             <span>NVIDIA request timeout (ms)</span>
-            <input id="nvidiaRequestTimeoutMs" name="nvidiaRequestTimeoutMs" type="number" min="5000" max="1800000" step="1000" />
+            <input id="nvidiaRequestTimeoutMs" name="nvidiaRequestTimeoutMs" type="number" min="5000" max="3600000" step="1000" />
             <small>How long Beryy waits for NVIDIA to start responding. Increase this for cold or queued models.</small>
           </label>
 
@@ -191,11 +191,11 @@
             </label>
             <label class="field">
               <span>Keep prompt tokens (num_keep)</span>
-              <input id="ollamaNumKeep" name="ollamaNumKeep" type="number" min="0" max="65536" step="1" />
+              <input id="ollamaNumKeep" name="ollamaNumKeep" type="number" min="0" step="1" />
             </label>
             <label class="field">
               <span>Max output override (num_predict)</span>
-              <input id="ollamaNumPredict" name="ollamaNumPredict" type="number" min="0" max="65536" step="1" />
+              <input id="ollamaNumPredict" name="ollamaNumPredict" type="number" min="0" step="1" />
               <small><code>0</code> uses Max output tokens above.</small>
             </label>
           </div>
@@ -357,6 +357,11 @@
           <label class="check">
             <input id="antiBotGuard" name="antiBotGuard" type="checkbox" />
             <span>Add short, randomized pauses after browser actions</span>
+          </label>
+
+          <label class="check">
+            <input id="virtualCursor" name="virtualCursor" type="checkbox" />
+            <span>Show a virtual pointer for Beryy's clicks and pointer actions</span>
           </label>
 
           <label class="field">

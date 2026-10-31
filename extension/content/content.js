@@ -28,6 +28,7 @@
   })();
 
   let refCounter = 0;
+  let virtualCursor = null;
   const elementMap = Object.create(null);
   const reverseMap = new WeakMap();
 
@@ -220,6 +221,7 @@
     if (!element) return null;
     const tag = element.tagName.toLowerCase();
     return {
+      tag,
       description: describeElement(element),
       role: getRole(element) || tag,
       name: getAccessibleName(element).slice(0, 160),
@@ -230,7 +232,8 @@
       ariaChecked: element.getAttribute("aria-checked") || "",
       disabled:
         Boolean(element.disabled) || element.getAttribute("aria-disabled") === "true",
-      checked: element.checked === true
+      checked: element.checked === true,
+      contentEditable: Boolean(element.isContentEditable)
     };
   }
 
@@ -272,10 +275,15 @@
     return found;
   }
 
+  function editableHost(element) {
+    if (!element?.isContentEditable) return element;
+    return element.closest?.('[contenteditable="true"], .cm-content') || element;
+  }
+
   function findControl(element) {
     const tag = element.tagName.toLowerCase();
     if (["input", "textarea", "select"].includes(tag)) return element;
-    if (element.isContentEditable) return element;
+    if (element.isContentEditable) return editableHost(element);
 
     if (element.shadowRoot) {
       const inner = element.shadowRoot.querySelector("input, textarea, select, [contenteditable='true']");
@@ -285,7 +293,7 @@
     for (const child of element.querySelectorAll("*")) {
       const childTag = child.tagName.toLowerCase();
       if (["input", "textarea", "select"].includes(childTag)) return child;
-      if (child.isContentEditable) return child;
+      if (child.isContentEditable) return editableHost(child);
       if (child.shadowRoot) {
         const deep = child.shadowRoot.querySelector("input, textarea, select, [contenteditable='true']");
         if (deep) return deep;
@@ -494,7 +502,13 @@ function scrollToRef(ref) {
 
   function getRefState(ref) {
     const element = resolveRef(ref);
-    return element ? elementState(element) : null;
+    if (!element) return null;
+    const state = elementState(element);
+    const control = findControl(element);
+    if (control && control !== element && control.isContentEditable) {
+      state.contentEditable = true;
+    }
+    return state;
   }
 
   function focusRef(ref) {
@@ -514,6 +528,152 @@ function scrollToRef(ref) {
       }
     }
     return document.activeElement === control || control.contains(document.activeElement);
+  }
+
+  function selectRefText(ref) {
+    const element = resolveRef(ref);
+    if (!element) return false;
+    const control = findControl(element) || element;
+    try {
+      control.focus({ preventScroll: true });
+    } catch {
+      // Fall through to the selection attempt.
+    }
+    const selection = window.getSelection?.();
+    if (!selection || typeof document.createRange !== "function") return false;
+    const range = document.createRange();
+    range.selectNodeContents(control);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
+  function createVirtualCursor() {
+    const host = document.createElement("div");
+    host.id = "__bery_virtual_cursor";
+    host.setAttribute("aria-hidden", "true");
+    host.style.cssText = [
+      "position:fixed",
+      "left:0",
+      "top:0",
+      "width:0",
+      "height:0",
+      "z-index:2147483647",
+      "pointer-events:none",
+      "overflow:visible",
+      "contain:layout style"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "closed" });
+
+    const ring = document.createElement("div");
+    ring.style.cssText = [
+      "position:absolute",
+      "width:18px",
+      "height:18px",
+      "margin:-9px 0 0 -9px",
+      "border:2px solid rgba(37,99,235,.95)",
+      "border-radius:999px",
+      "opacity:0",
+      "pointer-events:none"
+    ].join(";");
+
+    const pointer = document.createElement("div");
+    pointer.style.cssText = [
+      "position:absolute",
+      "left:0",
+      "top:0",
+      "width:22px",
+      "height:22px",
+      "opacity:0",
+      "pointer-events:none",
+      "transform:translate3d(-40px,-40px,0)",
+      "transition:transform 180ms cubic-bezier(.2,.8,.2,1), opacity 140ms linear",
+      "will-change:transform,opacity",
+      "filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))"
+    ].join(";");
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("width", "22");
+    svg.setAttribute("height", "22");
+    svg.style.cssText = "display:block;overflow:visible";
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M0 0 L0 16 L4.2 11.8 L7.1 18 L10 16.6 L7.1 10.5 L14 10.1 Z");
+    path.setAttribute("fill", "#ffffff");
+    path.setAttribute("stroke", "#111827");
+    path.setAttribute("stroke-width", "1.4");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    pointer.appendChild(svg);
+
+    shadow.append(ring, pointer);
+    (document.documentElement || document.body).appendChild(host);
+
+    return { host, pointer, ring, visible: false, x: null, y: null, timer: 0 };
+  }
+
+  async function showVirtualCursor(x, y, { pulse = false } = {}) {
+    const px = Number(x);
+    const py = Number(y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return false;
+    if (!virtualCursor || !virtualCursor.host.isConnected) {
+      virtualCursor = createVirtualCursor();
+    }
+
+    const state = virtualCursor;
+    const { pointer, ring } = state;
+    if (!state.visible) {
+      pointer.style.transition = "none";
+      pointer.style.transform = `translate3d(${px}px, ${py}px, 0)`;
+      void pointer.offsetWidth;
+      pointer.style.transition =
+        "transform 180ms cubic-bezier(.2,.8,.2,1), opacity 140ms linear";
+    }
+    pointer.style.opacity = "1";
+    pointer.style.transform = `translate3d(${px}px, ${py}px, 0)`;
+    state.visible = true;
+    state.x = px;
+    state.y = py;
+
+    if (pulse) {
+      ring.style.left = `${px}px`;
+      ring.style.top = `${py}px`;
+      ring.animate(
+        [
+          { opacity: 0.95, transform: "scale(.35)" },
+          { opacity: 0, transform: "scale(2.2)" }
+        ],
+        { duration: 520, easing: "cubic-bezier(.2,.7,.3,1)" }
+      );
+    }
+
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+      pointer.style.opacity = "0";
+      state.visible = false;
+    }, 1800);
+
+    await new Promise((resolve) => setTimeout(resolve, 190));
+    return true;
+  }
+
+  function hideVirtualCursor() {
+    if (!virtualCursor) return false;
+    clearTimeout(virtualCursor.timer);
+    virtualCursor.pointer.style.opacity = "0";
+    virtualCursor.visible = false;
+    return true;
+  }
+
+  function getVirtualCursorState() {
+    if (!virtualCursor) return { visible: false, x: null, y: null };
+    return {
+      visible: virtualCursor.visible,
+      x: virtualCursor.x,
+      y: virtualCursor.y
+    };
   }
 
   function getFocusInfo() {
@@ -594,10 +754,19 @@ function scrollToRef(ref) {
     }
 
     if (control.isContentEditable && tag !== "input" && tag !== "textarea") {
-      control.focus();
-      control.textContent = String(value);
-      dispatchInputEvents(control);
-      return `Set ${ref} contenteditable to "${String(value).slice(0, 60)}".`;
+      const text = String(value);
+      selectRefText(ref);
+      let inserted = false;
+      try {
+        inserted = document.execCommand?.("insertText", false, text) === true;
+      } catch {
+        inserted = false;
+      }
+      if (!inserted) {
+        control.textContent = text;
+        dispatchInputEvents(control);
+      }
+      return `Set ${ref} contenteditable to "${text.slice(0, 60)}".`;
     }
 
     const proto =
@@ -820,6 +989,14 @@ function scrollToRef(ref) {
         return getRefState(message.ref);
       case "focusRef":
         return focusRef(message.ref);
+      case "selectRefText":
+        return selectRefText(message.ref);
+      case "showVirtualCursor":
+        return showVirtualCursor(message.x, message.y, { pulse: Boolean(message.pulse) });
+      case "hideVirtualCursor":
+        return hideVirtualCursor();
+      case "getVirtualCursorState":
+        return getVirtualCursorState();
       case "getFocusInfo":
         return getFocusInfo();
       case "getPointState":

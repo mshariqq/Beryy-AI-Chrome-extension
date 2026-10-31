@@ -68,6 +68,7 @@ const trustedDomainsInput = $("trustedDomains");
 const blockTrackersInput = $("blockTrackers");
 const trackerAllowlistInput = $("trackerAllowlist");
 const antiBotGuardInput = $("antiBotGuard");
+const virtualCursorInput = $("virtualCursor");
 const actionDelayMsInput = $("actionDelayMs");
 const systemPromptExtraInput = $("systemPromptExtra");
 const statusEl = $("status");
@@ -290,7 +291,7 @@ function populate(settings) {
   toolModeInput.value = settings.toolMode;
   visionInput.checked = Boolean(settings.vision);
   nvidiaRateLimitInput.checked = settings.nvidiaRateLimit !== false;
-  nvidiaRequestTimeoutMsInput.value = settings.nvidiaRequestTimeoutMs ?? 180000;
+  nvidiaRequestTimeoutMsInput.value = settings.nvidiaRequestTimeoutMs ?? 1000000;
   googleTpmInput.value = settings.googleTpm;
   googleRpdInput.value = settings.googleRpd;
   googleRpmInput.value = settings.googleRpm;
@@ -326,6 +327,7 @@ function populate(settings) {
   blockTrackersInput.checked = Boolean(settings.blockTrackers);
   trackerAllowlistInput.value = (settings.trackerAllowlist || []).join("\n");
   antiBotGuardInput.checked = Boolean(settings.antiBotGuard);
+  virtualCursorInput.checked = settings.virtualCursor !== false;
   actionDelayMsInput.value = settings.actionDelayMs;
   systemPromptExtraInput.value = settings.systemPromptExtra || "";
   syncPacingControls();
@@ -358,6 +360,7 @@ function readForm() {
     blockTrackers: blockTrackersInput.checked,
     trackerAllowlist: trackerAllowlistInput.value,
     antiBotGuard: antiBotGuardInput.checked,
+    virtualCursor: virtualCursorInput.checked,
     actionDelayMs: actionDelayMsInput.value,
     systemPromptExtra: systemPromptExtraInput.value
   });

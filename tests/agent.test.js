@@ -221,6 +221,47 @@ function screenshotResult() {
   };
 }
 
+test("agent blocks a third identical tool call", async () => {
+  const calls = [];
+  const events = [];
+  let executed = 0;
+  const agent = new Agent({
+    settings: settings({ maxSteps: 4 }),
+    execute: async () => {
+      executed += 1;
+      return { content: [{ type: "text", text: "clicked" }] };
+    },
+    onEvent: (event) => events.push(event),
+    stream: async (options) => {
+      calls.push(options);
+      if (calls.length > 3) return finalAnswer();
+      return {
+        content: "",
+        toolCalls: [
+          {
+            id: `call_${calls.length}`,
+            name: "computer",
+            arguments:
+              calls.length === 3
+                ? '{"coordinate":[710,930],"action":"left_click"}'
+                : '{"action":"left_click","coordinate":[710,930]}'
+          }
+        ],
+        finishReason: "tool_calls",
+        mode: "native"
+      };
+    }
+  });
+
+  await agent.run("Click Save", { tabs: [] });
+
+  assert.equal(executed, 2);
+  assert.equal(calls.length, 4);
+  const errors = events.filter((event) => event.type === "tool_error");
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].error, /Repeated identical call/);
+});
+
 test("screenshots are not sent to text-only models", async () => {
   const calls = [];
   const events = [];

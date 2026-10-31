@@ -258,6 +258,38 @@ async function mouseClick(cdp, tabId, x, y, options = {}) {
   }
 }
 
+async function autoScrollToCoordinate(cdp, tabId, plan, viewport) {
+  const result = await cdp.send(tabId, "Runtime.evaluate", {
+    expression: `(() => {
+      const before = [window.scrollX, window.scrollY];
+      window.scrollBy({ left: ${plan.dx}, top: ${plan.dy}, behavior: "instant" });
+      return { before, after: [window.scrollX, window.scrollY] };
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
+  const value = result?.result?.value;
+  if (!value) return null;
+
+  const actualDx = Number(value.after?.[0]) - Number(value.before?.[0]);
+  const actualDy = Number(value.after?.[1]) - Number(value.before?.[1]);
+  if (!Number.isFinite(actualDx) || !Number.isFinite(actualDy)) return null;
+  if (!actualDx && !actualDy) return null;
+
+  await sleep(120);
+  const x = plan.x - actualDx;
+  const y = plan.y - actualDy;
+  if (
+    x < 0 ||
+    y < 0 ||
+    x >= viewport.width ||
+    y >= viewport.height
+  ) {
+    return null;
+  }
+  return { x, y, dx: actualDx, dy: actualDy };
+}
+
 function requireCoordinate(args, label = "coordinate") {
   const coordinate = args.coordinate;
   if (!Array.isArray(coordinate) || coordinate.length !== 2) {
@@ -269,6 +301,51 @@ function requireCoordinate(args, label = "coordinate") {
 export function coveredClickError(ref, point) {
   if (!point?.coveredBy) return "";
   return `${ref} is covered by ${point.coveredBy}. Dismiss that overlay, then call read_page again.`;
+}
+
+export function coordinateViewportError(x, y, viewport) {
+  const px = Number(x);
+  const py = Number(y);
+  if (!Number.isFinite(px) || !Number.isFinite(py)) {
+    return "Coordinates must be finite numbers [x, y].";
+  }
+  const width = Number(viewport?.width);
+  const height = Number(viewport?.height);
+  if (!(width > 0) || !(height > 0)) return "";
+  if (px < 0 || py < 0 || px >= width || py >= height) {
+    return `Coordinate (${Math.round(px)}, ${Math.round(py)}) is outside the visible viewport (${Math.round(width)}x${Math.round(height)} CSS px). Use a ref from find/read_page, or scroll until the target is visible.`;
+  }
+  return "";
+}
+
+export function coordinateScrollTarget(x, y, viewport, margin = 80) {
+  const px = Number(x);
+  const py = Number(y);
+  const width = Number(viewport?.width);
+  const height = Number(viewport?.height);
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+  if (!(width > 0) || !(height > 0)) return null;
+  if (px >= 0 && py >= 0 && px < width && py < height) return null;
+
+  const marginX = Math.min(margin, Math.floor(width / 3));
+  const marginY = Math.min(margin, Math.floor(height / 3));
+  const targetX = Math.min(Math.max(px, marginX), width - 1 - marginX);
+  const targetY = Math.min(Math.max(py, marginY), height - 1 - marginY);
+  const dx = px - targetX;
+  const dy = py - targetY;
+  if (!dx && !dy) return null;
+  if (Math.abs(dx) > width * 2 || Math.abs(dy) > height * 2) return null;
+
+  return { x: px, y: py, targetX, targetY, dx, dy };
+}
+
+export function coordinateTargetError(target) {
+  const tag = String(target?.tag || "").toLowerCase();
+  const role = String(target?.role || "").toLowerCase();
+  if (!["html", "body", "main"].includes(tag) && !["document", "main"].includes(role)) {
+    return "";
+  }
+  return `Coordinate click hit ${target?.description || `<${tag || "page"}>`}, which is a page container, not a control. Use find/read_page to get the target element ref, or choose a coordinate inside the actual button or link.`;
 }
 
 function shortValue(value) {
@@ -372,6 +449,47 @@ async function refState(tabId, ref) {
   return firstFrameResult(results)?.result || null;
 }
 
+async function showVirtualCursor(ctx, tabId, x, y, options = {}) {
+  if (ctx.settings?.virtualCursor === false) return;
+  await sendContent(
+    tabId,
+    {
+      type: "showVirtualCursor",
+      x,
+      y,
+      pulse: Boolean(options.pulse)
+    },
+    { timeoutMs: 1500 }
+  ).catch(() => {});
+}
+
+async function editorSelectAllShortcut() {
+  let platform = "";
+  try {
+    platform = (await globalThis.chrome?.runtime?.getPlatformInfo?.())?.os || "";
+  } catch {
+    platform = "";
+  }
+  platform ||= globalThis.navigator?.platform || "";
+  return /^mac/i.test(platform) || /Mac|iPhone|iPad/i.test(platform) ? "meta+a" : "ctrl+a";
+}
+
+async function writeContentEditable(ctx, tabId, ref, value) {
+  const text = String(value ?? "");
+  const sessionId = await keyboardSession(ctx, tabId, ref);
+  const selectAll = await editorSelectAllShortcut();
+  await dispatchKey(ctx.cdp, tabId, selectAll, 0, sessionId);
+  await sleep(50);
+
+  if (text) {
+    await ctx.cdp.send(tabId, "Input.insertText", { text }, 20000, sessionId);
+  } else {
+    await dispatchKey(ctx.cdp, tabId, "Backspace", 0, sessionId);
+  }
+  await sleep(50);
+  return textResult(`Set ${ref} contenteditable to "${text.slice(0, 60)}" via editor input.`);
+}
+
 async function keyboardSession(ctx, tabId, ref) {
   const targetRef = String(ref || "").trim();
   if (targetRef) {
@@ -403,9 +521,21 @@ async function keyboardSession(ctx, tabId, ref) {
   return context?.sessionId || "";
 }
 
-function screenshotResult(shot, label, screenshots, vision) {
+function screenshotResult(
+  shot,
+  label,
+  screenshots,
+  vision,
+  { coordinateHint = false } = {}
+) {
   const imageId = screenshots.add(shot.data);
-  const dimensions = shot.width && shot.height ? ` (${shot.width}x${shot.height} CSS px)` : "";
+  const range =
+    coordinateHint && shot.width && shot.height
+      ? `; click range x 0-${shot.width - 1}, y 0-${shot.height - 1}`
+      : "";
+  const dimensions = shot.width && shot.height
+    ? ` (${shot.width}x${shot.height} CSS px${range})`
+    : "";
   const visionNote = vision
     ? ""
     : " Vision is off, so this image is not visible to the model; use read_page, find, or get_page_text for page state.";
@@ -431,7 +561,13 @@ async function computer(ctx, args) {
   switch (action) {
     case "screenshot": {
       const shot = await takeScreenshot(ctx.cdp, tabId);
-      return screenshotResult(shot, "Captured screenshot", ctx.screenshots, ctx.settings?.vision);
+      return screenshotResult(
+        shot,
+        "Captured screenshot",
+        ctx.screenshots,
+        ctx.settings?.vision,
+        { coordinateHint: true }
+      );
     }
 
     case "left_click":
@@ -441,6 +577,7 @@ async function computer(ctx, args) {
       let x;
       let y;
       let targetState = null;
+      let scrollNote = "";
       const ref = args.ref ? String(args.ref) : "";
       if (ref) {
         const point = await refPoint(ctx, tabId, ref);
@@ -451,11 +588,28 @@ async function computer(ctx, args) {
         [x, y] = requireCoordinate(args);
       }
 
-      // Clamp coordinates to viewport bounds
       const vp = await viewport(ctx.cdp, tabId).catch(() => null);
-      if (vp) {
-        x = Math.max(0, Math.min(x, vp.width - 1));
-        y = Math.max(0, Math.min(y, vp.height - 1));
+      if (!ref && vp) {
+        const boundsError = coordinateViewportError(x, y, vp);
+        if (boundsError) {
+          const plan = coordinateScrollTarget(x, y, vp);
+          const moved = plan
+            ? await autoScrollToCoordinate(ctx.cdp, tabId, plan, vp).catch(() => null)
+            : null;
+          if (!moved) {
+            throw new Error(`${boundsError} Automatic scrolling could not bring that point into view.`);
+          }
+          x = moved.x;
+          y = moved.y;
+          const scrollParts = [];
+          if (moved.dx) {
+            scrollParts.push(`${Math.abs(Math.round(moved.dx))} px ${moved.dx > 0 ? "right" : "left"}`);
+          }
+          if (moved.dy) {
+            scrollParts.push(`${Math.abs(Math.round(moved.dy))} px ${moved.dy > 0 ? "down" : "up"}`);
+          }
+          scrollNote = scrollParts.length ? ` after auto-scrolling ${scrollParts.join(" and ")}` : "";
+        }
       }
 
       if (!targetState) {
@@ -466,8 +620,14 @@ async function computer(ctx, args) {
         }).catch(() => null);
       }
 
+      if (!ref) {
+        const targetError = coordinateTargetError(targetState);
+        if (targetError) throw new Error(targetError);
+      }
+
       const clickCount =
         action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
+      await showVirtualCursor(ctx, tabId, x, y, { pulse: true });
       const before = await chrome.tabs.get(tabId).catch(() => null);
       await mouseClick(ctx.cdp, tabId, x, y, {
         button: action === "right_click" ? "right" : "left",
@@ -490,9 +650,10 @@ async function computer(ctx, args) {
       const shot = await takeScreenshot(ctx.cdp, tabId);
       const shotResult = screenshotResult(
         shot,
-        `${action} at (${Math.round(x)}, ${Math.round(y)})${outcome ? ` ${outcome}` : ""}`,
+        `${action} at (${Math.round(x)}, ${Math.round(y)})${scrollNote}${outcome ? ` ${outcome}` : ""}`,
         ctx.screenshots,
-        ctx.settings?.vision
+        ctx.settings?.vision,
+        { coordinateHint: true }
       );
       return shotResult;
     }
@@ -508,13 +669,13 @@ async function computer(ctx, args) {
         [x, y] = requireCoordinate(args);
       }
 
-      // Clamp coordinates to viewport bounds
-      const vp = await viewport(ctx.cdp, tabId).catch(() => null);
-      if (vp) {
-        x = Math.max(0, Math.min(x, vp.width - 1));
-        y = Math.max(0, Math.min(y, vp.height - 1));
+      if (!args.ref) {
+        const vp = await viewport(ctx.cdp, tabId).catch(() => null);
+        const boundsError = vp ? coordinateViewportError(x, y, vp) : "";
+        if (boundsError) throw new Error(boundsError);
       }
 
+      await showVirtualCursor(ctx, tabId, x, y);
       await mouseMove(ctx.cdp, tabId, x, y, modifiers);
       return textResult(`Hovered at (${Math.round(x)}, ${Math.round(y)})`);
     }
@@ -552,6 +713,7 @@ async function computer(ctx, args) {
       const deltaX = direction === "left" ? -delta : direction === "right" ? delta : 0;
       const deltaY = direction === "up" ? -delta : direction === "down" ? delta : 0;
 
+      await showVirtualCursor(ctx, tabId, x, y);
       await ctx.cdp.send(tabId, "Input.dispatchMouseEvent", {
         type: "mouseWheel",
         x,
@@ -566,13 +728,15 @@ async function computer(ctx, args) {
         shot,
         `Scrolled ${direction} at (${x}, ${y})`,
         ctx.screenshots,
-        ctx.settings?.vision
+        ctx.settings?.vision,
+        { coordinateHint: true }
       );
     }
 
     case "scroll_to": {
       if (!args.ref) throw new Error("ref is required for scroll_to.");
       const point = await refPoint(ctx, tabId, args.ref);
+      await showVirtualCursor(ctx, tabId, point.x, point.y);
       return textResult(`Scrolled ${args.ref} into view at (${Math.round(point.x)}, ${Math.round(point.y)}).`);
     }
 
@@ -599,6 +763,7 @@ async function computer(ctx, args) {
         [x2, y2] = requireCoordinate(args);
       }
 
+      await showVirtualCursor(ctx, tabId, x1, y1);
       await mouseMove(ctx.cdp, tabId, x1, y1, modifiers);
       await ctx.cdp.send(tabId, "Input.dispatchMouseEvent", {
         type: "mousePressed",
@@ -626,6 +791,7 @@ async function computer(ctx, args) {
         clickCount: 1,
         modifiers
       });
+      await showVirtualCursor(ctx, tabId, x2, y2);
       return textResult(`Dragged from (${x1}, ${y1}) to (${Math.round(x2)}, ${Math.round(y2)}).`);
     }
 
@@ -854,6 +1020,10 @@ export async function executeTool(ctx, tool, args = {}) {
     case "form_input": {
       const { tabId } = await getTabForTool(ctx, args);
       if (!args.ref) throw new Error("ref is required for form_input.");
+      const state = await refState(tabId, args.ref).catch(() => null);
+      if (state?.contentEditable) {
+        return writeContentEditable(ctx, tabId, args.ref, args.value);
+      }
       const results = await sendContentAll(tabId, {
         type: "setFormInput",
         ref: args.ref,

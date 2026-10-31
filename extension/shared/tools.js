@@ -67,7 +67,7 @@ export const TOOLS = [
 
   fn(
     "computer",
-    "Mouse, keyboard, scrolling, and screenshots. Prefer element refs from read_page/find over coordinates when possible. Screenshots are returned by screenshot, scroll, zoom, and click actions. Click results name the element under the pointer and report any accessible state change. Coordinates are CSS pixels in the latest screenshot.",
+    "Mouse, keyboard, scrolling, and screenshots. Prefer element refs from read_page/find over coordinates when possible. Screenshots are returned by screenshot, scroll, zoom, and click actions. Click results name the element under the pointer and report any accessible state change. Coordinates are CSS pixels in the latest screenshot; a click just outside the viewport is scrolled into view automatically, but scrolling or using a ref is more reliable.",
     {
       type: "object",
       properties: {
@@ -201,7 +201,7 @@ export const TOOLS = [
 
   fn(
     "form_input",
-    "Set a form control's value by element ref (input, textarea, select, checkbox, radio, contenteditable).",
+    "Set a form control's value by element ref (input, textarea, select, checkbox, radio, contenteditable). Contenteditable editors such as CodeMirror receive text through their native input path, so edits persist.",
     {
       type: "object",
       properties: {
@@ -218,7 +218,7 @@ export const TOOLS = [
 
   fn(
     "javascript_tool",
-    "Execute JavaScript in the page's main world and return the result of the last expression.",
+    "Execute JavaScript in the page's main world and return the result of the last expression. Use form_input or computer type for contenteditable editors; direct textContent/innerHTML writes are often discarded by CodeMirror and similar editors.",
     {
       type: "object",
       properties: {

@@ -49,7 +49,7 @@ test("normalizeSettings clamps numeric fields", () => {
     maxSteps: 0
   });
   assert.equal(low.temperature, 0);
-  assert.equal(low.maxTokens, 65536);
+  assert.equal(low.maxTokens, 999999);
   assert.equal(low.maxSteps, 1);
 });
 
@@ -86,20 +86,24 @@ test("normalizeSettings handles tracker and pacing fields", () => {
   const defaults = normalizeSettings({});
   assert.equal(defaults.blockTrackers, true);
   assert.equal(defaults.antiBotGuard, true);
+  assert.equal(defaults.virtualCursor, true);
   assert.equal(defaults.actionDelayMs, 450);
   assert.deepEqual(defaults.trackerAllowlist, []);
 
   const custom = normalizeSettings({
     blockTrackers: false,
     antiBotGuard: "off",
+    virtualCursor: "off",
     actionDelayMs: 99999
   });
   assert.equal(custom.blockTrackers, false);
   assert.equal(custom.antiBotGuard, false);
+  assert.equal(custom.virtualCursor, false);
   assert.equal(custom.actionDelayMs, 5000);
 
   assert.equal(normalizeSettings({ actionDelayMs: -1 }).actionDelayMs, 0);
   assert.equal(normalizeSettings({ antiBotGuard: "yes" }).antiBotGuard, true);
+  assert.equal(normalizeSettings({ virtualCursor: "yes" }).virtualCursor, true);
 });
 
 test("normalizeSettings trims the base URL and keeps the API key", () => {
@@ -162,7 +166,7 @@ test("normalizeSettings includes Ollama defaults and validates options", () => {
   assert.equal(custom.ollama.apiMode, "openai");
   assert.equal(custom.ollama.keepAlive, "1h");
   assert.equal(custom.ollama.numCtx, 4096);
-  assert.equal(custom.ollama.numPredict, 65536);
+  assert.equal(custom.ollama.numPredict, 999999);
   assert.equal(custom.ollama.numGpu, 4);
   assert.equal(custom.ollama.numThread, 8);
   assert.equal(custom.ollama.numBatch, 128);
@@ -245,10 +249,14 @@ test("normalizeSettings accepts the NVIDIA rate limit toggle", () => {
 
 test("normalizeSettings clamps the NVIDIA request timeout", () => {
   const defaults = normalizeSettings({});
-  assert.equal(defaults.nvidiaRequestTimeoutMs, 180000);
+  assert.equal(defaults.nvidiaRequestTimeoutMs, 1000000);
   assert.equal(
     normalizeSettings({ nvidiaRequestTimeoutMs: 30000 }).nvidiaRequestTimeoutMs,
     30000
+  );
+  assert.equal(
+    normalizeSettings({ nvidiaRequestTimeoutMs: 180000 }).nvidiaRequestTimeoutMs,
+    1000000
   );
   assert.equal(
     normalizeSettings({ nvidiaRequestTimeoutMs: 1 }).nvidiaRequestTimeoutMs,
@@ -256,7 +264,7 @@ test("normalizeSettings clamps the NVIDIA request timeout", () => {
   );
   assert.equal(
     normalizeSettings({ nvidiaRequestTimeoutMs: 9999999 }).nvidiaRequestTimeoutMs,
-    1800000
+    3600000
   );
 });
 

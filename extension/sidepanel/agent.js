@@ -19,6 +19,19 @@ function parseArgs(raw) {
   return value;
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    return `{${keys
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function resultToText(result) {
   if (result == null) return "(no output)";
   if (typeof result === "string") return result.slice(0, 30000);
@@ -631,6 +644,8 @@ export class Agent {
     this.onEvent({ type: "turn_start" });
 
     let step = 0;
+    let lastActionKey = "";
+    let repeatedActions = 0;
     while (step < this.settings.maxSteps) {
       step += 1;
       this.onEvent({ type: "assistant_start", step });
@@ -778,6 +793,31 @@ export class Agent {
           tool: call.name,
           args
         });
+
+        const actionKey = `${call.name}:${stableStringify(args)}`;
+        if (actionKey === lastActionKey) {
+          repeatedActions += 1;
+        } else {
+          lastActionKey = actionKey;
+          repeatedActions = 1;
+        }
+
+        if (repeatedActions > 2) {
+          const message = `Repeated identical call to ${call.name} with the same arguments. The previous attempts did not change the result; inspect the page with find/read_page or choose a different action.`;
+          this.history.push({
+            role: "tool",
+            callId: call.id,
+            name: call.name,
+            content: `Error: ${message}`
+          });
+          this.onEvent({
+            type: "tool_error",
+            callId: call.id,
+            tool: call.name,
+            error: message
+          });
+          continue;
+        }
 
         try {
           const toolResult = await this.execute(call.name, args);

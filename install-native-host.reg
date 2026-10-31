@@ -1,0 +1,4 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.beryy.ws_bridge]
+@="C:\\Users\\user\\Dev\\Beryy-chrome-ext\\native\\ws-bridge\\com.beryy.ws_bridge.json"

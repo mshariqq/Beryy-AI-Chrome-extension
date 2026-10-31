@@ -1,0 +1,9 @@
+{
+  "name": "com.beryy.ws_bridge",
+  "description": "Beryy WebSocket URL bridge",
+  "path": "C:\\Users\\user\\Dev\\Beryy-chrome-ext\\native\\ws-bridge\\ws-bridge.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://cokhlogkkmmgocmpfdefaicepfejkiko"
+  ]
+}
