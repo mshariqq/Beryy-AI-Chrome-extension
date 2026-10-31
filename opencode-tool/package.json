@@ -1,0 +1,16 @@
+{
+  "name": "beryy-tool",
+  "version": "1.0.0",
+  "description": "Opencode tool for Beryy Chrome extension",
+  "type": "module",
+  "main": "beryy-tool.js",
+  "bin": {
+    "beryy-tool": "beryy-tool.js"
+  },
+  "scripts": {
+    "test": "node beryy-tool.js --help"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

@@ -58,6 +58,18 @@ Beryy lives in your browser's side panel. You give it a goal — *"Find the pric
 
 ---
 
+## Control Beryy from opencode
+
+Let an AI model in the [opencode](https://opencode.ai) terminal drive your real Chrome browser through Beryy — the same way opencode integrates Playwright, via a local MCP server.
+
+```bash
+node opencode-bridge.js        # start the bridge
+```
+
+Then register `opencode-tool/beryy-mcp.js` as an MCP server in `opencode.json`. Full walkthrough: **[BRIDGE_SETUP.md](BRIDGE_SETUP.md)** - protocol details in [BRIDGE_README.md](BRIDGE_README.md).
+
+---
+
 ## Screenshots
 
 | Side panel in action | Icon |

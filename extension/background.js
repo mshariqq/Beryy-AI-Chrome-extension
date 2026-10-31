@@ -7,6 +7,7 @@ import { executeTool } from "./lib/tools.js";
 import { getSettings, saveSettings } from "./shared/settings.js";
 import { domainFromUrl } from "./shared/policy.js";
 import { nextActionDelay } from "./shared/pacing.js";
+import { startWsBridge } from "./shared/ws-bridge.js";
 import {
   ALLOW_RULE_ID_START,
   TRACKER_RULESET_ID,
@@ -257,6 +258,60 @@ chrome.runtime.onConnect.addListener((port) => {
   post(port, { type: "ready" });
 });
 
+// Tool execution requests coming from the opencode WebSocket bridge.
+async function executeBridgeTool(tool, args) {
+  const argsCopy = { ...(args || {}) };
+  let tab = null;
+
+  if (!NO_TAB_TOOLS.has(tool)) {
+    const tabId = await tabs.resolveTabId(argsCopy.tabId);
+    tab = await tabs.getTabInfo(tabId);
+    argsCopy.tabId = tabId;
+  } else if (tool === "tabs_close_mcp") {
+    const first = Array.isArray(argsCopy.tabIds) ? argsCopy.tabIds[0] : argsCopy.tabId;
+    if (first != null) {
+      try {
+        tab = await tabs.getTabInfo(first);
+      } catch {
+        tab = null;
+      }
+    }
+  }
+
+  const settings = await getSettings();
+  // If the side panel is open, permission prompts go there; otherwise
+  // permission-requiring tools are rejected with a clear error.
+  const decision = await permissions.authorize({
+    tool,
+    args: argsCopy,
+    tab,
+    port: firstSidePanelPort()
+  });
+  if (!decision.allowed) {
+    throw new Error(decision.reason);
+  }
+
+  if (tab && decision.permission !== "control") {
+    const fresh = await chrome.tabs.get(tab.tabId);
+    const freshHost = domainFromUrl(fresh.url);
+    const expectedHost = decision.host || domainFromUrl(tab.url);
+    if (expectedHost && freshHost !== expectedHost) {
+      throw new Error(
+        `Blocked: the tab changed from ${expectedHost} to ${freshHost || "an unknown page"} after permission was granted.`
+      );
+    }
+  }
+
+  return executeTool(toolContext(decision.settings), tool, argsCopy);
+}
+
+function firstSidePanelPort() {
+  for (const port of ports) {
+    return port;
+  }
+  return null;
+}
+
 chrome.debugger.onEvent.addListener((source, method, params) => {
   cdp.handleEvent(source.tabId, method, params, source.sessionId);
   events.handleEvent(source.tabId, method, params);
@@ -294,6 +349,8 @@ async function bootstrap() {
   await tabs.recover();
   await syncTrackerRules();
   chrome.alarms.create("bery-recover", { periodInMinutes: 0.5 });
+
+  startWsBridge(executeBridgeTool);
 }
 
 chrome.runtime.onInstalled.addListener(() => {

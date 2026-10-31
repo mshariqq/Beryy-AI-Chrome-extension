@@ -44,5 +44,8 @@
   "private": false,
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }

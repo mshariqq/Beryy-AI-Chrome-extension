@@ -61,11 +61,20 @@ export class TabManager {
   }
 
   async pickSeedTab() {
-    let [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (!active) {
-      const [fallback] = await chrome.tabs.query({ active: true });
-      active = fallback;
+    // Only seed from normal browser windows - DevTools/app/popup windows
+    // reject chrome.tabs.group with "Tabs can only be moved to and from
+    // normal windows".
+    let normalWindows = [];
+    try {
+      normalWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+    } catch {
+      normalWindows = await chrome.windows.getAll();
     }
+    const normalIds = new Set(normalWindows.map((window) => window.id));
+
+    const actives = await chrome.tabs.query({ active: true });
+    const candidates = actives.filter((tab) => normalIds.has(tab.windowId));
+    const active = candidates[0] || actives[0] || null;
     if (!active) return null;
 
     // Do not steal a tab the user already grouped, and do not try to script
